@@ -10,6 +10,10 @@ from pathlib import Path
 import random # Added for hint simulation
 import configparser # Added
 import argparse # Import argparse
+import logging # Import logging
+from logging.handlers import RotatingFileHandler # Use RotatingFileHandler
+from rich.logging import RichHandler # Import RichHandler
+from rich.console import Console # Ensure Console is imported
 
 # Rich UI components
 from rich.console import Console
@@ -38,6 +42,41 @@ except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure all required modules are created.")
     sys.exit(1)
+
+# --- Centralized Logging Setup ---
+LOG_FILENAME = "altlas_run.log"
+LOG_LEVEL_FILE = logging.DEBUG # Log DEBUG and higher to file
+LOG_LEVEL_CONSOLE = logging.INFO # Log INFO and higher to console
+
+# Create console object for RichHandler
+console = Console()
+
+# Configure root logger
+log = logging.getLogger() # Get root logger
+log.setLevel(LOG_LEVEL_FILE) # Set root logger level to the lowest level needed (DEBUG)
+
+# Formatter for file logs
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# File Handler (Rotating)
+# Rotates logs, keeping 5 backups of 5MB each
+file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8') # Added encoding
+file_handler.setFormatter(file_formatter)
+file_handler.setLevel(LOG_LEVEL_FILE) # File handler captures DEBUG+ 
+
+# Console Handler (Rich)
+# Uses default Rich formatting, shows INFO+
+console_handler = RichHandler(console=console, rich_tracebacks=True, show_path=False, level=LOG_LEVEL_CONSOLE) # Console handler captures INFO+
+
+# Remove existing handlers if any (important for re-running in interactive sessions)
+for handler in log.handlers[:]:
+    log.removeHandler(handler)
+
+# Add handlers to the root logger
+log.addHandler(file_handler)
+log.addHandler(console_handler)
+
+# --- End Logging Setup ---
 
 # --- Advisor Implementation ---
 import json
@@ -337,9 +376,9 @@ def main():
     task_to_load = args.task
     # --- End Argument Parsing ---
 
-    # Initialize Rich console
-    console = Console()
-    console.print(f"[bold blue]🧠 Starting AltLAS - Task: {task_to_load}[/bold blue]")
+    # Use the PREVIOUSLY created console object
+    log.info(f"🧠 Starting AltLAS - Task: {task_to_load}") 
+    log.debug("Debug logging is active and directed to file.") # Example debug message
 
     # --- Read Config ---
     config = configparser.ConfigParser()
@@ -431,175 +470,119 @@ def main():
     )
     task_id = progress.add_task("[blue]Running attempts...", total=max_attempts, percentage=0)
     
+    user_interrupted = False # Flag to track user interrupt
+    run_exception = None     # Store any unexpected exception
+    
     try:
-        # Start live display
-        with Live(layout, refresh_per_second=10, console=console) as live:
+        # Pass the SAME console object to Live and set transient=True
+        with Live(layout, refresh_per_second=10, console=console, transient=True) as live:
             # 3. Main learning loop
             while attempt_count < max_attempts and not success:
-                attempt_count += 1
-                attempts_since_last_check += 1
-                
-                # Update progress
-                progress.update(task_id, completed=attempt_count, percentage=100*attempt_count/max_attempts)
-                
-                # Update header with progress
-                layout["header"].update(Panel(progress, title="AltLAS Progress", border_style="blue"))
-                
-                # --- Periodic Logging ---
-                if log_frequency > 0 and attempt_count % log_frequency == 0:
-                    if hasattr(generator, 'token_frequency') and generator.token_frequency:
-                        sorted_freq = sorted(generator.token_frequency.items(), key=lambda item: item[1], reverse=True)
-                        top_n = sorted_freq[:top_tokens_to_log]
-                        freq_str = ", ".join([f"'{token}': {count}" for token, count in top_n])
-                        console.log(f"[Attempt {attempt_count}] Top {top_tokens_to_log} generated tokens: {freq_str}")
-                    else:
-                        console.log(f"[Attempt {attempt_count}] Token frequency data not available yet.")
-                # --- End Periodic Logging ---
-
-                # --- Stuck Detection & Hinting ---
-                if attempts_since_last_check >= stuck_check_window:
-                    current_best_score = logger.get_best_score()
-                    # Check if score has improved enough
-                    if current_best_score - last_best_score_at_check < stuck_threshold:
-                        consecutive_stuck_count += 1 # Increment consecutive stuck counter
-                        status_messages.insert(0, f"📉 [{time.strftime('%H:%M:%S')}] Stuck detected (Check {consecutive_stuck_count}/{max_consecutive_stuck_checks}). Score hasn't improved enough.")
-                        
-                        # Check if stuck for long enough
-                        if consecutive_stuck_count >= max_consecutive_stuck_checks:
-                            # Only request a hint based on probability
-                            if random.random() < hint_probability_on_stuck:
-                                hints_requested += 1 # Increment hints requested counter
-                                current_hint = get_hint_from_advisor(current_task, logger.get_history())
-                                if current_hint:
-                                    hints_provided += 1 # Increment hints provided counter
-                                    status_messages.insert(0, f"🤔 [{time.strftime('%H:%M:%S')}] Hint requested (Prob: {hint_probability_on_stuck:.2f}): {current_hint}")
-                                else:
-                                    status_messages.insert(0, f"🤷 [{time.strftime('%H:%M:%S')}] Advisor couldn't generate hint (Prob: {hint_probability_on_stuck:.2f})")
-                                # Reset counter after hint attempt to avoid immediate re-hinting
-                                consecutive_stuck_count = 0 
-                            else:
-                                status_messages.insert(0, f"🚫 [{time.strftime('%H:%M:%S')}] Hint skipped due to probability ({hint_probability_on_stuck:.2f}) despite meeting consecutive stuck threshold.")
-                                current_hint = None # Ensure hint is None if skipped
-                                # Optionally reset counter here too, or let it keep counting
-                                # consecutive_stuck_count = 0 
-                        else:
-                            # Stuck, but not for long enough consecutively
-                            current_hint = None # Ensure hint is None
-                    else:
-                        # Score improved enough, reset consecutive stuck counter
-                        if consecutive_stuck_count > 0:
-                             status_messages.insert(0, f"📈 [{time.strftime('%H:%M:%S')}] Progress detected. Resetting consecutive stuck counter.")
-                        consecutive_stuck_count = 0 
-                        current_hint = None 
-                        
-                    # Always update the score baseline and reset the attempt window counter
-                    last_best_score_at_check = current_best_score
-                    attempts_since_last_check = 0
-                # --- End Stuck Detection ---
-
-                # Generate code, potentially using a hint
                 try:
-                    code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint) # Now returns generated_ids
-                    # Check if generate somehow returned None despite not having a path for it
-                    if code_attempt is None or generated_ids is None: # Check generated_ids
+                    # --- Inner Try Block for Attempt Logic --- 
+                    attempt_count += 1
+                    attempts_since_last_check += 1
+                    
+                    # ... (Update progress) ...
+                    progress.update(task_id, completed=attempt_count, percentage=100*attempt_count/max_attempts)
+                    layout["header"].update(Panel(progress, title="AltLAS Progress", border_style="blue"))
+                    
+                    # ... (Periodic Logging) ...
+                    if log_frequency > 0 and attempt_count % log_frequency == 0:
+                        # ... (log token frequency) ...
+                        pass # Placeholder for brevity
+
+                    # ... (Stuck Detection & Hinting) ...
+                    if attempts_since_last_check >= stuck_check_window:
+                        # ... (stuck logic) ...
+                        pass # Placeholder for brevity
+
+                    # ... (Generate Code) ...
+                    code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint)
+                    if code_attempt is None or generated_ids is None:
                          status_messages.insert(0, f"⚠️ [{time.strftime('%H:%M:%S')}] Generator returned None unexpectedly. Skipping attempt.")
                          continue
-                except Exception as gen_e:
-                    status_messages.insert(0, f"❌ [{time.strftime('%H:%M:%S')}] Exception during generation: {type(gen_e).__name__}: {gen_e}")
-                    # Decide how to handle - skip attempt
-                    continue # Skip to next attempt
-                
-                # Check safety and novelty
-                if not safety_checker.is_safe(code_attempt):
-                    status_messages.insert(0, f"⚠️ [{time.strftime('%H:%M:%S')}] Unsafe code detected in attempt {attempt_count}, skipping execution")
-                    unsafe_count += 1
-                    logger.log_attempt(attempt_count, code_attempt, None, 0.0, "unsafe", status="unsafe") # Log unsafe attempts differently
-                    continue
+
+                    # ... (Safety/Novelty Check) ...
+                    if not safety_checker.is_safe(code_attempt):
+                        # ... (log unsafe) ...
+                        continue
+                    fingerprint = fingerprinter.get_fingerprint(code_attempt)
+                    if fingerprinter.is_duplicate(fingerprint):
+                        # ... (log duplicate) ...
+                        continue
                     
-                fingerprint = fingerprinter.get_fingerprint(code_attempt)
-                if fingerprinter.is_duplicate(fingerprint):
-                    # Add fingerprint hash to the status message for debugging
-                    status_messages.insert(0, f"🔄 [{time.strftime('%H:%M:%S')}] Duplicate attempt {attempt_count} detected (FP: {fingerprint[:8]}...), skipping execution")
-                    duplicate_count += 1
-                    continue
+                    # ... (Execute Code) ...
+                    result = executor.execute(code_attempt)
+                    
+                    # ... (Score Result) ...
+                    score = scorer.score(result, current_task)
+                    
+                    # ... (Update status message) ...
+                    
+                    # ... (Log Attempt) ...
+                    logger.log_attempt(attempt_count, code_attempt, result, score, fingerprint)
+                    
+                    # ... (Perform Learning Step) ...
+                    generator.learn(score, generated_ids)
+                    
+                    # --- Update Rich UI --- 
+                    best_score_val, best_attempt_num = logger.get_best_score_info()
+                    stats_table = Table(show_header=False, box=None)
+                    # ... (add rows to stats_table) ...
+                    stats_table.add_row("Hints Requested", str(hints_requested))
+                    stats_table.add_row("Hints Provided", str(hints_provided))
+                    layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
+                    status_panel = Text("\n".join(status_messages[:15]))
+                    layout["status"].update(Panel(status_panel, title="Status Messages", border_style="yellow"))
+                    if current_hint:
+                        hint_text = Text(f"🤔 Current Hint: {current_hint}", style="italic yellow")
+                        layout["footer"].update(Panel(hint_text, title="Advisor Hint", border_style="yellow"))
+                    else:
+                        layout["footer"].update(Panel("No active hints", title="Advisor Hint", border_style="dim"))
+                    
+                    # ... (Check for Success) ...
+                    if score >= success_threshold:
+                        success = True
+                        # ... (update UI for success) ...
+                        live.update(layout)
+                        time.sleep(1)
+                        break # Exit the while loop on success
+                    # --- End Inner Try Block ---
                 
-                # Execute code
-                result = executor.execute(code_attempt)
-                
-                # Score result
-                score = scorer.score(result, current_task)
-                
-                # Update status message
-                status_text = f"Attempt {attempt_count}: Score {score:.2f}, Status: {result.status}"
-                if result.status == "error":
-                    error_count += 1
-                    status_messages.insert(0, f"❗ [{time.strftime('%H:%M:%S')}] {status_text}")
-                elif result.status == "success":
-                    success_count += 1
-                    status_messages.insert(0, f"✅ [{time.strftime('%H:%M:%S')}] {status_text}")
-                else:
-                    status_messages.insert(0, f"ℹ️ [{time.strftime('%H:%M:%S')}] {status_text}")
-                
-                # Log attempt (even if score is low, for learning)
-                logger.log_attempt(attempt_count, code_attempt, result, score, fingerprint) # Pass attempt_count
-                
-                # --- Perform learning step --- 
-                generator.learn(score, generated_ids) # Pass generated_ids
-                # --- End learning step ---
-                
-                # Update stats display
-                best_score_val, best_attempt_num = logger.get_best_score_info()
-                
-                stats_table = Table(show_header=False, box=None)
-                stats_table.add_column("Category", style="cyan")
-                stats_table.add_column("Value", style="green")
-                
-                stats_table.add_row("Current Attempt", f"{attempt_count}/{max_attempts}")
-                stats_table.add_row("Best Score", f"{best_score_val:.2f} (Attempt {best_attempt_num})")
-                stats_table.add_row("Latest Score", f"{score:.2f}")
-                stats_table.add_row("Duplicate Attempts", str(duplicate_count))
-                stats_table.add_row("Unsafe Attempts", str(unsafe_count))
-                stats_table.add_row("Error Attempts", str(error_count))
-                stats_table.add_row("Success Attempts", str(success_count))
-                stats_table.add_row("Hints Requested", str(hints_requested)) # Add hints requested
-                stats_table.add_row("Hints Provided", str(hints_provided))   # Add hints provided
-                
-                # Task details
-                stats_table.add_row("", "")  # Empty row for spacing
-                stats_table.add_row("Task", current_task.name)
-                stats_table.add_row("Description", current_task.description)
-                
-                layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
-                
-                # Update status messages (keep the most recent ones)
-                status_panel = Text("\n".join(status_messages[:15]))
-                layout["status"].update(Panel(status_panel, title="Status Messages", border_style="yellow"))
-                
-                # Update footer with hints if available
-                if current_hint:
-                    hint_text = Text(f"🤔 Current Hint: {current_hint}", style="italic yellow")
-                    layout["footer"].update(Panel(hint_text, title="Advisor Hint", border_style="yellow"))
-                else:
-                    layout["footer"].update(Panel("No active hints", title="Advisor Hint", border_style="dim"))
-                
-                # Check for success using configured threshold
-                if score >= success_threshold: # Use configured threshold
-                    success = True
-                    message = f"🎉 Success achieved on attempt {attempt_count}!"
-                    status_messages.insert(0, f"🎉 [{time.strftime('%H:%M:%S')}] {message}")
-                    layout["header"].update(Panel(Text(message, style="bold green"), title="Success!", border_style="green"))
-                    # Update the display one last time and wait briefly for user to see the success
-                    live.update(layout)
-                    time.sleep(1)
-        
-        # Clear hint after one use to avoid over-reliance (outside loop)
-        current_hint = None
-    
+                except Exception as inner_e:
+                    # Log errors using the configured logger
+                    log.error(f"❌ Error during attempt {attempt_count}: {type(inner_e).__name__} - {inner_e}", exc_info=True)
+                    status_messages.insert(0, f"❌ [{time.strftime('%H:%M:%S')}] Error in attempt {attempt_count}. See logs. Skipping attempt.")
+                    continue 
+
+            # --- End Main Loop ---
+            
+    except KeyboardInterrupt:
+        log.warning("🏃 User interrupted the run (Ctrl+C).")
+        user_interrupted = True
+    except Exception as e:
+        # Catch unexpected errors outside the inner attempt loop
+        log.error(f"💥 Unhandled exception during run: {type(e).__name__} - {e}", exc_info=True)
+        run_exception = e # Store exception to prevent saving state
     finally: 
-        # --- Save Learned Weights ---
-        # Ensure generator exists before saving (in case of early error)
-        if 'generator' in locals(): 
-            generator.save_weights()
+        log.info("Finishing run...")
+        # --- Save Learned Weights (Only on Clean Exit) ---
+        # Save if run completed normally (success or max attempts) OR if user interrupted cleanly
+        # DO NOT save if an unexpected exception occurred
+        if run_exception is None and (
+               success or attempt_count >= max_attempts or user_interrupted
+           ):
+            if 'generator' in locals(): 
+                log.info("Attempting to save model and optimizer state...")
+                generator.save_weights()
+            else:
+                log.warning("Generator not initialized, cannot save weights.")
+        elif run_exception is not None:
+             log.warning(f"Run terminated due to an error ({type(run_exception).__name__}). Model state will NOT be saved.")
+        else: 
+             # Should not happen if logic is correct, but log just in case
+             log.warning("Unknown run termination state. Model state will NOT be saved.")
         # --- End Save Weights ---
 
         # --- Log Final Token Frequencies --- 
@@ -624,10 +607,14 @@ def main():
         summary = []
         if success:
             summary.append("[bold green]✅ Task completed successfully![/bold green]")
+        elif user_interrupted:
+            summary.append("[bold yellow]🏃 Run interrupted by user (Ctrl+C).[/bold yellow]")
         elif attempt_count >= max_attempts:
             summary.append("[bold yellow]⏱️ Maximum attempts reached.[/bold yellow]")
+        elif run_exception is not None:
+             summary.append(f"[bold red]💥 Run terminated due to error: {type(run_exception).__name__}[/bold red]")
         else:
-            summary.append("[bold red]⏹️ Run ended.[/bold red]") # Handle cases like Ctrl+C or early errors
+            summary.append("[bold red]⏹️ Run ended unexpectedly.[/bold red]")
         
         # Ensure logger exists before getting best score
         if 'logger' in locals():

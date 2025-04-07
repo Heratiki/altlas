@@ -4,8 +4,8 @@ import torch.nn.init as init # Import init module
 import logging # Import logging
 from typing import Tuple
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging - REMOVED basicConfig call
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class AltLAS_RNN(nn.Module):
     """

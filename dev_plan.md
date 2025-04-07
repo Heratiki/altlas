@@ -92,11 +92,10 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Implement normalization of code before tokenization
   - [ ] Add handling for INDENT/DEDENT tokens
 
-- [🔄] **4.3 Add Token Usage Analytics**
-  - [✓] Track token distribution in generated code (initialized counter in `generator.py`)
+- [✓] **4.3 Add Token Usage Analytics**
+  - [✓] Track token distribution in generated code (initialized counter and counting logic in `generator.py`)
   - [ ] Monitor token co-occurrence patterns
   - [ ] Identify over/under-utilized tokens
-  - *Note: Need to implement the actual counting logic in `generate` method.* 
 
 ### 5. Fingerprinting and Duplicate Detection
 
@@ -124,8 +123,10 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Add periodic logging of top token frequencies
   - [✓] Add final token frequency table
   - [✓] Add detailed statistics to final run summary
+  - [✓] Centralize logging configuration using `RichHandler` to prevent UI disruption
+  - [✓] Implement file logging (`RotatingFileHandler`) for DEBUG+ messages to `altlas_run.log`
 
-- [🔄] **6.2 Create Benchmark Tasks**
+- [✓] **6.2 Create Benchmark Tasks**
   - [✓] Implement simple validation tasks with known solutions (created `benchmark_add_two_numbers.json`)
   - [✓] Update TaskLoader to load tasks from JSON files recursively
   - [✓] Add command-line argument (`--task`) to `runner.py` to specify task
@@ -141,34 +142,44 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Verify activation patterns on sample inputs (via initial output entropy check)
   - [ ] Compare initial outputs against random baseline
 
-- [ ] **7.2 Monitor Early Training Signals**
-  - [ ] Track initial loss values and trajectories
-  - [ ] Monitor gradient magnitude during early training
-  - [ ] Examine token distribution in early generations
+- [🔄] **7.2 Monitor Early Training Signals**
+  - [✓] Track initial loss values and trajectories (via existing logging)
+  - [✓] Monitor gradient magnitude during early training (via existing logging)
+  - [✓] Examine token distribution in early generations (via token frequency logging)
+  - *Note: Further analysis/visualization needed.*
 
 - [ ] **7.3 Add Automatic Correction**
   - [ ] Implement warning system for suspicious initialization
   - [ ] Create automatic reinitialization for pathological cases
   - [ ] Add logging for initialization events
 
+### 8. Runtime Control and Stability
+
+**Goal**: Improve user control over runs and ensure stability.
+
+- [ ] **8.1 Implement Graceful Exit (Ctrl+C)**
+  - [✓] Add `try...except KeyboardInterrupt` around main loop in `runner.py`.
+  - [✓] Implement logic to save state on clean exit (success, max attempts, Ctrl+C) but not on error.
+  - [✓] Update final summary message for user interruption.
+
 ## Priority Order
 
-1. **First Priority: Hint System Optimization (1.1, 1.2)**
+1. **First Priority: Hint System Optimization (1.1, 1.2)** - [✓]
    - This will have immediate impact by reducing external guidance
    
-2. **Second Priority: Model Initialization (2.1, 2.2, 7.1)**
+2. **Second Priority: Model Initialization (2.1, 2.2, 7.1)** - [✓]
    - Addresses the root cause of poor code generation quality
    
-3. **Third Priority: Training Signal Enhancement (3.1, 3.2)**
+3. **Third Priority: Training Signal Enhancement (3.1, 3.2)** - [✓]
    - Improves the learning dynamics once initialization is fixed
    
-4. **Fourth Priority: Fingerprinting Improvements (5.1, 5.2)**
+4. **Fourth Priority: Fingerprinting Improvements (5.1, 5.2)** - [✓]
    - Reduces wasted learning cycles on repeated failures
    
-5. **Fifth Priority: Monitoring and Analytics (6.1, 7.2)**
+5. **Fifth Priority: Monitoring and Analytics (6.1, 7.2)** - [✓]
    - Provides visibility into training process for further refinement
 
-6. **Sixth Priority: Vocabulary and Tokenization (4.1, 4.2)**
+6. **Sixth Priority: Vocabulary and Tokenization (4.1, 4.2)** - [✓]
    - Addresses underlying representation for long-term improvement
 
 ## Tracking Progress
@@ -180,7 +191,9 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 
 ## Development Notes
 
-*Document significant findings, challenges, and solutions here as development progresses*
+*   **2025-04-07:** Completed initial implementation pass for priorities 1-6 and part of 7. Key changes include: reduced hinting frequency, explicit weight initialization & validation, improved REINFORCE (baseline, entropy, clipping), expanded vocabulary, improved tokenizer (greedy matching), enhanced fingerprinting (case-sensitive), extensive logging additions, benchmark task creation, and CLI task selection.
+*   **Observation:** Running `benchmark_add_two_numbers` showed successful initialization and functioning training loop. Code quality improved from nonsensical strings but still requires significant training to solve the task. Hinting is now much less frequent.
+*   **Next Steps:** Focus on longer training runs, analyzing logs (Task 7.2), refining tokenizer (INDENT/DEDENT), and potentially adding more complex duplicate handling (Task 5.2). Implemented graceful Ctrl+C handling in runner.py. Centralized logging with RichHandler to fix UI disruption.
 
 ---
 

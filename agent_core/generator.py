@@ -32,7 +32,6 @@ except ImportError as e:
          raise # Re-raise original error if secondary fails
 
 # Configure basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CodeGenerator:
     """Generates code attempts using a PyTorch RNN model and learns via RL."""

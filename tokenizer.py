@@ -4,8 +4,8 @@ from pathlib import Path
 import logging
 import re # Import regex
 
-# Configure basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure basic logging - REMOVED basicConfig call
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Tokenizer:
     """

@@ -26,6 +26,15 @@ class TaskLoader:
     def load_task(self, task_name):
         """Load a task by name."""
         # For now, return hardcoded tasks for simplicity
+        # FUTURE INTENT: Task loading and management will become more dynamic:
+        # 1.  Loading from Files: Define tasks in separate files (e.g., JSON, YAML, or even Python modules)
+        #     within the `tasks/` directory instead of hardcoding them here.
+        # 2.  Task Generation: Potentially generate tasks programmatically based on difficulty parameters
+        #     or observed agent capabilities (curriculum learning).
+        # 3.  Task Dependencies: Define dependencies between tasks (e.g., Task B requires concepts learned in Task A).
+        # 4.  Complex Task Types: Support richer task definitions beyond simple input/output or function checks,
+        #     including tasks involving state, interaction, resource constraints, or specific library usage.
+        # 5.  Task Validation: Add validation to ensure task definitions are well-formed.
         tasks = {
             "hello_world": Task(
                 name="hello_world",

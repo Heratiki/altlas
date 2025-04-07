@@ -7,6 +7,8 @@ import tempfile
 import os
 from dataclasses import dataclass
 import time
+import configparser
+from pathlib import Path
 
 @dataclass
 class ExecutionResult:
@@ -21,8 +23,13 @@ class ExecutionResult:
 class CodeExecutor:
     """Executes code attempts safely and returns results."""
     
-    def __init__(self, timeout=5):
-        self.timeout = timeout  # seconds
+    def __init__(self, config_path="config.ini"):
+        config = configparser.ConfigParser()
+        # Use absolute path for reliability within modules
+        abs_config_path = Path(__file__).parent.parent / config_path
+        config.read(abs_config_path)
+        exec_config = config['Executor']
+        self.timeout = exec_config.getint('Timeout', 5)
         
     def execute(self, code):
         """Execute the provided code and return the results.
@@ -42,6 +49,18 @@ class CodeExecutor:
         
         try:
             # Execute the code in a subprocess
+            # FUTURE INTENT: The execution environment needs careful consideration for safety and consistency.
+            # 1.  Enhanced Sandboxing: While using a subprocess is a start, true sandboxing might involve:
+            #     - Running inside dedicated, minimal Docker containers per execution.
+            #     - Using technologies like `nsjail` or `firecracker` for stronger isolation.
+            #     - Applying resource limits (CPU, memory, time, network access, filesystem visibility)
+            #       more granularly than just a simple timeout.
+            # 2.  Environment Consistency: Ensure the execution environment is identical across all runs
+            #     and matches the target environment if the agent is intended to produce code for a specific platform.
+            # 3.  State Management: For tasks requiring state across multiple executions (e.g., interacting
+            #     with a simulated API or filesystem), the executor needs to manage this state safely.
+            # 4.  Observability: Potentially capture more detailed execution traces (e.g., using `sys.settrace`
+            #     or external tools) if needed for advanced scoring or debugging, while being mindful of overhead.
             process = subprocess.Popen(
                 ['python', temp_path],
                 stdout=subprocess.PIPE,

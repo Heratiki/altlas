@@ -30,16 +30,29 @@ class AttemptLogger:
             score (float): The attempt's score.
             fingerprint (str): The attempt's fingerprint.
         """
+        # FUTURE INTENT: The logging mechanism can be significantly enhanced:
+        # 1.  Structured Logging: Use a more structured format (e.g., JSON lines) for easier parsing and analysis.
+        # 2.  Selective Logging: Implement more sophisticated criteria for what constitutes a "valuable" attempt
+        #     worth logging in detail vs. just summarizing. This could be based on score thresholds, novelty,
+        #     specific error types encountered, or reduction in error complexity.
+        # 3.  Metadata: Log richer metadata, such as the generator state (e.g., weights used), hint received (if any),
+        #     task parameters, execution resource usage (CPU/memory if available from executor).
+        # 4.  Database Backend: For larger scale runs, logging to files might become inefficient. Consider using
+        #     a database (like SQLite initially, or potentially a NoSQL DB) for better querying and management.
+        # 5.  Error Classification: Log categorized error types (SyntaxError, NameError, TypeError, etc.) 
+        #     extracted from `result.stderr` to provide more specific feedback for learning.
         attempt = {
             'timestamp': time.time(),
             'code': code,
             'fingerprint': fingerprint,
+            # FUTURE INTENT: Store the full ExecutionResult object or its dict representation 
+            # instead of manually copying fields, ensuring all execution details are captured.
             'result': {
-                'status': result.status,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'runtime': result.runtime,
-                'exit_code': result.exit_code
+                'status': result.status if result else 'unsafe_or_duplicate',
+                'stdout': result.stdout if result else '',
+                'stderr': result.stderr if result else '',
+                'runtime': result.runtime if result else 0,
+                'exit_code': result.exit_code if result else -1
             },
             'score': score
         }
@@ -70,6 +83,11 @@ class AttemptLogger:
         Returns:
             list: The most recent attempts.
         """
+        # FUTURE INTENT: Retrieving history might become more complex.
+        # - Need efficient ways to retrieve relevant history for specific learning algorithms 
+        #   (e.g., getting attempts with similar code structures, or attempts that failed with specific errors).
+        # - May involve querying a database if the backend changes.
+        # - Could implement different history views (e.g., only successful attempts, only recent failures).
         return self.attempts[-limit:] if self.attempts else []
     
     def get_best_score(self):

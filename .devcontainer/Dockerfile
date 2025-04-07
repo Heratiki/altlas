@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --upgrade pip && \
     pip install onnx onnxruntime numpy rich
 
+# Install PyTorch (CPU Version)
+# Check https://pytorch.org/ for current commands
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
 # Create a working directory
 WORKDIR /workspace
 

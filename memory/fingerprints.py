@@ -49,6 +49,17 @@ class AttemptFingerprinter:
     
     def _normalize_code(self, code):
         """Normalize code to ignore non-semantic differences."""
+        # FUTURE INTENT: This normalization is very basic (removing comments/blanks, lowercasing).
+        # More sophisticated normalization could involve:
+        # 1.  AST-based Normalization: Parsing the code into an Abstract Syntax Tree (AST) and then 
+        #     serializing it back into a canonical string format. This ignores variations in whitespace,
+        #     comment content, and potentially variable naming (if alpha-renaming is applied).
+        # 2.  Semantic Hashing: Techniques like SimHashing could be used to generate fingerprints where
+        #     similar code (semantically) results in similar hashes, allowing detection of near-duplicates,
+        #     not just exact duplicates after basic normalization.
+        # 3.  Considering Execution Behavior: Fingerprinting could potentially incorporate aspects of the
+        #     code's execution trace or output for certain inputs, although this is more complex.
+        
         # Remove comments
         code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
         
@@ -59,6 +70,8 @@ class AttemptFingerprinter:
         code = code.strip()
         
         # Convert to lowercase (simplistic but helps for now)
+        # FUTURE INTENT: Lowercasing is too aggressive as it loses case sensitivity which matters in Python.
+        # AST-based normalization would be a much better approach.
         return code.lower()
     
     def is_duplicate(self, fingerprint):

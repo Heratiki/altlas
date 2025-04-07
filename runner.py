@@ -23,6 +23,7 @@ try:
     from memory.logger import AttemptLogger
     from memory.fingerprints import AttemptFingerprinter
     from task.task_loader import TaskLoader
+    from utils import get_pytorch_device # <-- Add import
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Please ensure all required modules are created.")
@@ -103,13 +104,17 @@ def main():
         sys.exit(1)
     # --- End Read Config ---
     
+    # --- Determine PyTorch Device ---
+    device = get_pytorch_device() # <-- Determine device
+    # --- End Determine Device ---
+    
     # 1. Load task
     task_loader = TaskLoader()
-    current_task = task_loader.load_task("hello_world")  
+    current_task = task_loader.load_task("hello_world")
     print(f"📋 Loaded task: {current_task.name}")
     
     # 2. Initialize components, passing config path as string
-    generator = CodeGenerator(config_path=str(config_path))
+    generator = CodeGenerator(config_path=str(config_path), device=device) # <-- Pass device
     safety_checker = SafetyChecker() # Assuming no config needed yet
     executor = CodeExecutor(config_path=str(config_path))
     scorer = AttemptScorer(config_path=str(config_path))
@@ -143,7 +148,7 @@ def main():
             # --- End Stuck Detection ---
 
             # Generate code, potentially using a hint
-            code_attempt = generator.generate(current_task, logger.get_history(), hint=current_hint)
+            code_attempt, log_probs = generator.generate(current_task, logger.get_history(), hint=current_hint) # Capture log_probs
             print(f"📝 Generated code attempt ({len(code_attempt)} chars)")
             
             # Check safety and novelty
@@ -168,6 +173,10 @@ def main():
             # Log attempt (even if score is low, for learning)
             # Pass the actual result object now
             logger.log_attempt(code_attempt, result, score, fingerprint) 
+            
+            # --- Perform learning step --- 
+            generator.learn(score, log_probs)
+            # --- End learning step ---
                 
             # Check for success using configured threshold
             if score >= success_threshold: # Use configured threshold

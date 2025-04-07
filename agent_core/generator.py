@@ -1,249 +1,276 @@
 """
 Code generator that creates new code attempts based on task and history.
+Now uses a PyTorch RNN model.
 """
 
 import random
-import string
-from collections import Counter
-import re 
-import json 
-from pathlib import Path 
-import configparser # Added
+import json
+from pathlib import Path
+import configparser
+import logging
+
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+
+# Assuming tokenizer.py and model.py are sibling modules or correctly in path
+try:
+    # Need to adjust import path relative to runner.py execution context
+    from tokenizer import Tokenizer
+    from agent_core.model import AltLAS_RNN
+except ImportError as e:
+    logging.error(f"Error importing Tokenizer or AltLAS_RNN: {e}. Ensure they are in the correct path relative to the execution root.")
+    # Attempt relative import if run as module? (Less likely scenario here)
+    try:
+        from .model import AltLAS_RNN
+        # Assuming tokenizer is at the root level
+        import sys
+        sys.path.append(str(Path(__file__).parent.parent))
+        from tokenizer import Tokenizer
+    except ImportError:
+         logging.error(f"Secondary import attempt failed: {e}")
+         raise # Re-raise original error if secondary fails
+
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CodeGenerator:
-    """Generates code attempts for the AltLAS system, learning from history."""
-    
-    def __init__(self, config_path="config.ini"): # Added config_path
+    """Generates code attempts using a PyTorch RNN model and learns via RL."""
+
+    def __init__(self, config_path="config.ini", device=torch.device("cpu")):
+        """
+        Initializes the CodeGenerator with Tokenizer, Model, and Optimizer.
+
+        Args:
+            config_path (str): Path to the configuration file (relative to project root).
+            device (torch.device): The PyTorch device to use (cpu or cuda).
+        """
         # --- Read Config ---
         config = configparser.ConfigParser()
-        # Use absolute path for reliability within modules
-        abs_config_path = Path(__file__).parent.parent / config_path
+        # config_path is expected relative to project root where runner.py is
+        abs_config_path = Path(config_path).resolve()
+        if not abs_config_path.exists():
+             logging.error(f"Config file not found at resolved path: {abs_config_path}")
+             # Fallback attempt relative to this file's parent's parent
+             abs_config_path = Path(__file__).parent.parent / config_path
+             if not abs_config_path.exists():
+                  raise FileNotFoundError(f"Config file not found at {config_path} or {abs_config_path}")
         config.read(abs_config_path)
-        
-        gen_config = config['Generator']
-        self.learning_rate = gen_config.getfloat('LearningRate', 0.05) 
-        self.history_window = gen_config.getint('HistoryWindow', 20) 
-        # Construct absolute path for weights file based on workspace root
-        self.weights_file = Path(__file__).parent.parent / gen_config.get('WeightsFile', 'memory/generator_weights.json')
-        self.epsilon = gen_config.getfloat('Epsilon', 0.1) # Read epsilon
+        logging.info(f"CodeGenerator reading config from: {abs_config_path}")
+
+        try:
+            gen_config = config['Generator']
+            paths_config = config['Paths']
+            optimizer_config = config['Optimizer']
+            model_config = config['Model'] # Added section for model params
+
+            self.max_gen_length = gen_config.getint('MaxGenerationLength', 50)
+
+            # Model Hyperparameters
+            self.embedding_dim = model_config.getint('EmbeddingDim', 64)
+            self.hidden_dim = model_config.getint('HiddenDim', 128)
+            self.num_layers = model_config.getint('NumLayers', 1)
+
+            # Optimizer Hyperparameters
+            self.learning_rate = optimizer_config.getfloat('LearningRate', 0.001)
+
+            # Paths
+            # Paths should be relative to project root defined in config
+            self.vocab_path = Path(paths_config.get('VocabFile', 'memory/vocab.json'))
+            self.model_state_path = Path(paths_config.get('ModelStateFile', 'memory/model_state.pth'))
+            self.optimizer_state_path = Path(paths_config.get('OptimizerStateFile', 'memory/optimizer_state.pth'))
+
+        except KeyError as e:
+            logging.error(f"Missing section or key in config file {abs_config_path}: {e}")
+            raise
+        except ValueError as e:
+             logging.error(f"Invalid value type in config file {abs_config_path}: {e}")
+             raise
         # --- End Read Config ---
 
-        # Define basic Python building blocks
-        # FUTURE INTENT: This list represents the absolute ground floor of the agent's knowledge.
-        # Initially, it only knows these raw tokens. Over time, through reinforcement, it should 
-        # learn which sequences are syntactically valid and semantically useful for given tasks.
-        # Eventually, it might even learn to *generate* new, more abstract building blocks (like functions or patterns)
-        # if doing so proves beneficial for scoring across multiple tasks.
-        self.keywords = ["print", "if", "else", "for", "while", "def", "return", "pass"]
-        self.operators = ["=", "+", "-", "*", "/", "==", "!=", "<", ">"]
-        self.literals = [f'"{word}"' for word in ["hello", "world", "a", "b", "x", "y", "result"]] + \
-                   [str(i) for i in range(10)] + ["True", "False", "None"]
-        self.common_vars = [f"var_{c}" for c in string.ascii_lowercase[:5]]
-        
-        self.all_elements = self.keywords + self.operators + self.literals + self.common_vars
-        
-        # --- Weight Loading ---
-        # self.weights_file is now set from config
-        self.element_weights = self._load_weights()
-        if not self.element_weights:
-             # Initialize weights if file doesn't exist or is invalid
-             print("Initializing new generator weights.")
-             self.element_weights = {element: 1.0 for element in self.all_elements}
-             # Normalize initial weights
-             total_weight = sum(self.element_weights.values())
-             if total_weight > 0:
-                 for element in self.element_weights:
-                     self.element_weights[element] /= total_weight
-        else:
-             print(f"Loaded generator weights from {self.weights_file}")
-             # FUTURE INTENT: Validate loaded weights more thoroughly. 
-             # Check if the distribution seems reasonable or if it has collapsed.
-             # Potentially implement mechanisms to 're-energize' weights if learning stagnates
-             # (e.g., temporarily increasing epsilon or slightly resetting weights).
-             # Basic validation: check if loaded keys match current elements
-             # (Handled inside _load_weights now)
-        # --- End Weight Loading ---
+        self.device = device
+        logging.info(f"CodeGenerator using device: {self.device}")
 
-    def _load_weights(self):
-        """Load element weights from the specified file."""
-        if self.weights_file.exists():
-            try:
-                with open(self.weights_file, 'r') as f:
-                    weights = json.load(f)
-                    # Basic validation: check if loaded keys match current elements
-                    if set(weights.keys()) == set(self.all_elements):
-                        return weights
-                    else:
-                        print("Warning: Loaded weights keys mismatch current elements. Re-initializing.")
-                        return None
-            except json.JSONDecodeError:
-                print(f"Warning: Error decoding weights file {self.weights_file}. Re-initializing.")
-                return None
-            except Exception as e:
-                print(f"Warning: Error loading weights file {self.weights_file}: {e}. Re-initializing.")
-                return None
-        return None
+        # Initialize Tokenizer
+        # Ensure path is absolute or relative to project root
+        if not self.vocab_path.is_absolute():
+            self.vocab_path = Path(__file__).parent.parent / self.vocab_path
+        self.tokenizer = Tokenizer(vocab_path=str(self.vocab_path))
+
+        # Initialize Model
+        self.model = AltLAS_RNN(
+            vocab_size=self.tokenizer.vocab_size,
+            embedding_dim=self.embedding_dim,
+            hidden_dim=self.hidden_dim,
+            num_layers=self.num_layers
+        ).to(self.device)
+        logging.info(f"Initialized AltLAS_RNN model with {sum(p.numel() for p in self.model.parameters())} parameters.")
+
+        # Initialize Optimizer
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        logging.info(f"Initialized Adam optimizer with learning rate: {self.learning_rate}")
+
+        # Attempt to load previous state
+        self._load_state() # Call load state during initialization
 
     def save_weights(self):
-        """Save the current element weights to the specified file."""
+        """Saves the state dictionaries of the model and optimizer."""
         try:
-            # Ensure the directory exists
-            self.weights_file.parent.mkdir(parents=True, exist_ok=True) 
-            with open(self.weights_file, 'w') as f:
-                json.dump(self.element_weights, f, indent=2)
-            print(f"Saved generator weights to {self.weights_file}")
+            # Ensure parent directories exist
+            self.model_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self.optimizer_state_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save model state
+            torch.save(self.model.state_dict(), self.model_state_path)
+            logging.info(f"Saved model state to {self.model_state_path}")
+
+            # Save optimizer state
+            torch.save(self.optimizer.state_dict(), self.optimizer_state_path)
+            logging.info(f"Saved optimizer state to {self.optimizer_state_path}")
+
         except Exception as e:
-            print(f"Error saving weights to {self.weights_file}: {e}")
+            logging.error(f"Error saving model/optimizer state: {e}")
 
-    def _update_weights(self, history):
-        """Adjust element weights based on recent attempt scores."""
-        if not history:
-            return
-
-        # Consider only the recent history
-        recent_history = history[-self.history_window:]
-        
-        # Calculate adjustments based on scores
-        adjustments = Counter()
-        total_score_effect = 0
-
-        for attempt in recent_history:
-            score = attempt.get('score', 0.0)
-            code = attempt.get('code', '')
-            
-            # Simple tokenization (split by space) - very basic!
-            # FUTURE INTENT: Replace this naive splitting with proper AST (Abstract Syntax Tree) parsing 
-            # or at least Python's `tokenize` module. This would allow the agent to understand 
-            # the actual structure and elements used (e.g., differentiate variable names from strings, 
-            # ignore comments) and assign credit/blame more accurately during reinforcement learning.
-            # This is crucial for learning meaningful syntax and semantics beyond just keyword frequency.
-            tokens_in_attempt = set(code.split(' ')) 
-            
-            # Find which known elements were present
-            elements_present = {elem for elem in self.all_elements if elem in tokens_in_attempt}
-
-            # Adjust weights based on score (reward good, penalize bad)
-            # Give higher weight to higher scores
-            reward = score * score # Square score to emphasize high scores more
-            penalty = (1.0 - score) * 0.1 # Penalize failures less harshly initially
-
-            for element in elements_present:
-                 adjustments[element] += reward 
-                 adjustments[element] -= penalty
-                 total_score_effect += abs(reward - penalty) # Track magnitude of changes
-
-        if total_score_effect == 0: return # Avoid division by zero if no effective history
-
-        # Apply adjustments with learning rate
-        for element, adj in adjustments.items():
-             # Scale adjustment by learning rate and relative magnitude
-             scaled_adj = self.learning_rate * (adj / total_score_effect) * len(self.all_elements)
-             self.element_weights[element] += scaled_adj
-             # Ensure weights don't go below a small positive value
-             self.element_weights[element] = max(0.01, self.element_weights[element])
-
-        # Normalize weights (optional, but keeps them manageable)
-        total_weight = sum(self.element_weights.values())
-        if total_weight > 0:
-            for element in self.element_weights:
-                self.element_weights[element] /= total_weight
-        else: # Reset if all weights somehow became zero
-             self.element_weights = {element: 1.0 for element in self.all_elements}
-
-    def _apply_hint(self, hint):
-        """Temporarily boost weights based on keywords found in the hint."""
-        if not hint:
-            return
-
-        print(f"Applying hint: {hint}")
-        # Very basic hint processing: look for known elements mentioned
-        # FUTURE INTENT: Develop a more sophisticated hint processing mechanism.
-        # This could involve: 
-        # 1. Using NLP techniques (even simple ones) to extract key concepts or code structures from the hint.
-        # 2. Translating the hint into a more direct modification of the generator's state 
-        #    (e.g., temporarily forcing the generation of a specific structure, not just boosting weights).
-        # 3. Allowing the agent to learn *how* to best utilize different kinds of hints over time.
-        hint_keywords = re.findall(r'\b\w+\b', hint.lower()) # Extract words
-        
-        boost_factor = 1.5 # How much to boost hinted elements (tuneable)
-
-        for element in self.element_weights:
-            # Check if the element itself (or part of it, e.g., 'print' in 'printing') is in the hint
-            if any(element.strip('"') in h_word for h_word in hint_keywords):
-                 print(f"Boosting weight for '{element}' based on hint.")
-                 self.element_weights[element] *= boost_factor
-
-        # Re-normalize weights after boosting
-        total_weight = sum(self.element_weights.values())
-        if total_weight > 0:
-            for element in self.element_weights:
-                self.element_weights[element] /= total_weight
-
-    def generate(self, task, history=None, hint=None): # Added hint parameter
-        """Generate a code attempt, learning from history and potentially using a hint."""
-        
-        # 1. Learn from history first
-        if history:
-            self._update_weights(history)
-
-        # 2. Apply hint if provided (modifies weights temporarily)
-        if hint:
-            self._apply_hint(hint) # Apply hint *after* normal weight updates
-            
-        # 3. Generate code using current (potentially hinted) weights
-        # Pass epsilon read from config
-        # FUTURE INTENT: The generation process itself will become the core area for evolution.
-        # Instead of just picking weighted elements, this could involve:
-        # - Sequence generation models (RNNs, Transformers built with PyTorch/ONNX).
-        # - Evolutionary algorithms (genetic programming) operating on code structures.
-        # - Graph-based generation representing code flow.
-        # The choice depends on which approach proves most effective through experimentation.
-        return self._generate_basic_code_sequence(task, self.epsilon) 
-
-    def _generate_basic_code_sequence(self, task, epsilon): # Added epsilon parameter
-        """Generate a short sequence of basic Python elements using learned weights."""
-        # FUTURE INTENT: This function represents the most primitive form of generation.
-        # It should eventually be replaced or augmented by more structured approaches that understand syntax.
-        # Early improvements could involve templates or simple grammar rules learned via reinforcement.
-        # Long term, this might be replaced entirely by a neural network or evolutionary generator.
-        
-        # Get current elements and their weights
-        elements = list(self.element_weights.keys())
-        weights = list(self.element_weights.values())
-
-        # Normalize weights to ensure they sum to 1 for random.choices
-        total_weight = sum(weights)
-        if total_weight <= 0: # Handle edge case where all weights are zero or negative
-            weights = [1.0] * len(elements) # Fallback to uniform
-            total_weight = sum(weights)
-        normalized_weights = [w / total_weight for w in weights]
-
-        # Generate a short sequence of random elements based on weights
-        code_length = random.randint(1, 5) 
-        
-        # Add a small chance (epsilon) of picking a random element regardless of weight
-        # This encourages exploration
-        code_parts = []
-        for _ in range(code_length):
-            if random.random() < epsilon: # Use passed epsilon
-                code_parts.append(random.choice(elements))
+    def _load_state(self):
+        """Loads the state dictionaries for the model and optimizer if files exist."""
+        try:
+            if self.model_state_path.exists():
+                # Load state dict, ensuring it's mapped to the correct device
+                self.model.load_state_dict(torch.load(self.model_state_path, map_location=self.device))
+                self.model.to(self.device) # Ensure model is on the correct device after loading
+                logging.info(f"Loaded model state from {self.model_state_path}")
             else:
-                code_parts.append(random.choices(elements, weights=normalized_weights, k=1)[0])
+                logging.info("Model state file not found. Initializing new model.")
 
-        # Very basic formatting attempt (same as before, could be improved)
-        # FUTURE INTENT: Instead of hardcoding these simple formatting rules (print, assignment),
-        # the agent should *learn* these common syntactic patterns through reinforcement.
-        # Successful attempts using `print(...)` should reinforce that structure over just `print` followed by random elements.
-        # This moves towards learning syntax rather than having it pre-programmed.
-        if "print" in code_parts and any(lit in code_parts for lit in self.literals):
-             printable = random.choice([lit for lit in code_parts if lit in self.literals])
-             return f"print({printable})"
-        elif "=" in code_parts and any(var in code_parts for var in self.common_vars) and any(lit in code_parts for lit in self.literals):
-             var = random.choice([v for v in code_parts if v in self.common_vars])
-             val = random.choice([lit for lit in code_parts if lit in self.literals])
-             return f"{var} = {val}"
-        else:
-            # FUTURE INTENT: Generating random sequences that are often invalid is necessary early on
-            # for exploration, but the system must learn to reduce this over time by favouring
-            # sequences that pass the executor/scorer.
-            return " ".join(code_parts)
+            if self.optimizer_state_path.exists():
+                self.optimizer.load_state_dict(torch.load(self.optimizer_state_path, map_location=self.device))
+                # Manually move optimizer states to the correct device if needed (sometimes necessary)
+                for state in self.optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            state[k] = v.to(self.device)
+                logging.info(f"Loaded optimizer state from {self.optimizer_state_path}")
+            else:
+                logging.info("Optimizer state file not found. Initializing new optimizer.")
+
+        except Exception as e:
+            logging.error(f"Error loading model/optimizer state: {e}. Starting with fresh state.")
+
+    def generate(self, task=None, history=None, hint=None):
+        """
+        Generates a code attempt using the RNN model by sampling token by token.
+
+        Args:
+            task: The current task definition (unused in this basic version).
+            history: History of previous attempts (unused in this basic version).
+            hint: Hint from advisor (unused in this basic version).
+
+        Returns:
+            tuple: (generated_code_string, log_probabilities_tensor)
+                   - generated_code_string (str): The decoded code attempt.
+                   - log_probabilities_tensor (torch.Tensor): Tensor containing the
+                     log probability of each *generated* token (excluding SOS/EOS).
+                     Shape: (sequence_length,)
+        """
+        self.model.eval() # Set model to evaluation mode (disables dropout etc.)
+        generated_ids = []
+        log_probs_list = [] # Store log probs of chosen tokens
+
+        # Start sequence generation with SOS token
+        current_token_id = self.tokenizer.sos_token_id
+        # Input tensor needs batch dimension: (batch_size=1, seq_len=1)
+        input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
+
+        # Initialize hidden state for the batch
+        hidden = self.model.init_hidden(batch_size=1, device=self.device)
+
+        with torch.no_grad(): # Disable gradient calculation during generation
+            for _ in range(self.max_gen_length):
+                # Get output logits and updated hidden state from the model
+                # Output shape: (batch=1, seq=1, vocab_size)
+                logging.debug(f"Loop {_}: Input shape {input_tensor.shape}")
+                output_logits, hidden = self.model(input_tensor, hidden)
+
+                logging.debug(f"Loop {_}: Model output logits shape {output_logits.shape}")
+                # Get logits for the last token: shape (vocab_size)
+                # Squeeze removes batch and sequence dimensions (both are 1)
+                last_logits = output_logits.squeeze(0).squeeze(0)
+
+                # Apply softmax to get probabilities for sampling
+                probabilities = F.softmax(last_logits, dim=-1)
+
+                # Apply log_softmax to get log probabilities (numerically stable)
+                log_probabilities = F.log_softmax(last_logits, dim=-1)
+
+                # Sample the next token ID based on the probabilities
+                next_token_id = torch.multinomial(probabilities, num_samples=1).item()
+
+                logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id}")
+                # --- Token Handling ---
+                # 1. Stop if EOS token is generated
+                if next_token_id == self.tokenizer.eos_token_id:
+                    break
+
+                # 2. Store generated ID (excluding SOS, implicitly excluding EOS by breaking)
+                generated_ids.append(next_token_id)
+
+                # 3. Store log probability of the *chosen* token for RL
+                log_probs_list.append(log_probabilities[next_token_id])
+
+                # 4. Prepare input for the next iteration: the chosen token
+                current_token_id = next_token_id
+                input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
+
+        # Decode the generated sequence of IDs back to a string
+        # Pass only the generated IDs (excluding SOS/EOS)
+        generated_tensor = torch.LongTensor(generated_ids)
+        generated_code = self.tokenizer.decode(generated_tensor) # decode handles filtering special tokens
+
+        # Stack the collected log probabilities into a single tensor for the learning step
+        log_probs_tensor = torch.stack(log_probs_list) if log_probs_list else torch.empty(0, device=self.device)
+
+        logging.debug(f"Returning from generate. Code type: {type(generated_code)}, Log probs type: {type(log_probs_tensor)}")
+        logging.debug(f"Generated code: '{generated_code}'")
+        logging.debug(f"Log probs shape: {log_probs_tensor.shape}")
+
+    def learn(self, reward: float, log_probs: torch.Tensor):
+        """
+        Updates the model weights using the REINFORCE algorithm based on the
+        reward received for a generated sequence.
+
+        Args:
+            reward (float): The scalar reward obtained for the generated sequence.
+                            (In this simple case, the final score is used as the return).
+            log_probs (torch.Tensor): A tensor containing the log probabilities of the
+                                      actions (tokens) taken in the generated sequence.
+                                      Shape: (sequence_length,)
+        """
+        if log_probs.numel() == 0:
+            logging.warning("Learn called with empty log_probs tensor. Skipping update.")
+            return # Cannot learn from an empty sequence
+
+        self.model.train() # Set model to training mode
+
+        # REINFORCE loss: - (sum of log_probs * reward)
+        # We want to maximize reward, so we minimize the negative expectation.
+        # Using the final reward as the return G_t for all steps in this simple version.
+        # Ensure reward is on the same device as log_probs if it needs to be a tensor operation,
+        # but here it's a scalar multiplier.
+        loss = -torch.sum(log_probs) * reward
+        
+        # Ensure loss is on the correct device before backward pass
+        loss = loss.to(self.device)
+
+        logging.debug(f"Calculated loss: {loss.item()} for reward: {reward}")
+
+        # Perform optimization step
+        self.optimizer.zero_grad() # Clear previous gradients
+        loss.backward()           # Calculate gradients
+        # Optional: Gradient clipping can help stabilize training
+        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+        self.optimizer.step()      # Update model parameters
+
+        logging.debug("Optimizer step performed.")
+
+
+# Removed leftover return statement and comment

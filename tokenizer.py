@@ -2,6 +2,7 @@ import json
 import torch
 from pathlib import Path
 import logging
+import re # Import regex
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,6 +28,11 @@ class Tokenizer:
         self.unk_token_id = 3
 
         self._load_vocab()
+        # Sort tokens by length descending to prioritize longer matches (e.g., <= before <)
+        self._sorted_tokens = sorted(self.token_to_id.keys(), key=len, reverse=True)
+        # Remove special tokens from sorted list used for matching code text
+        self._sorted_tokens_no_special = [t for t in self._sorted_tokens if not (t.startswith('<') and t.endswith('>')) and t not in ["INDENT", "DEDENT"]]
+        logging.info(f"Prepared {len(self._sorted_tokens_no_special)} non-special tokens for matching.")
 
     def _load_vocab(self):
         """Loads the vocabulary from the JSON file."""
@@ -67,8 +73,9 @@ class Tokenizer:
 
     def encode(self, text: str) -> torch.Tensor:
         """
-        Encodes a string of text into a tensor of token IDs.
-        Adds SOS and EOS tokens. Uses UNK for unknown tokens.
+        Encodes a string of text into a tensor of token IDs using greedy matching.
+        Handles newlines and basic token structures.
+        Adds SOS and EOS tokens. Uses UNK for unknown sequences.
 
         Args:
             text (str): The input string (e.g., a code snippet).
@@ -76,22 +83,45 @@ class Tokenizer:
         Returns:
             torch.Tensor: A LongTensor containing the sequence of token IDs.
         """
-        # Simple space-based tokenization (matches old generator, improve later)
-        tokens = text.split(' ') 
-        # Filter out empty strings that might result from multiple spaces
-        tokens = [token for token in tokens if token] 
-        
         encoded_ids = [self.sos_token_id]
-        for token in tokens:
-            encoded_ids.append(self.token_to_id.get(token, self.unk_token_id))
-        encoded_ids.append(self.eos_token_id)
+        remaining_text = text
+        current_pos = 0
 
+        while current_pos < len(text):
+            # Handle whitespace - skip multiple spaces/tabs
+            if text[current_pos].isspace():
+                # If it's a newline, add the newline token
+                if text[current_pos] == '\n':
+                    encoded_ids.append(self.token_to_id.get("\\n", self.unk_token_id))
+                current_pos += 1
+                continue # Skip other whitespace for now
+
+            # Greedy matching: Find the longest token in vocab that matches the start of remaining_text
+            match_found = False
+            for token in self._sorted_tokens_no_special: # Use list without special tokens
+                # Need to handle potential regex special chars in tokens if using regex matching later
+                # For now, simple startswith check
+                if text.startswith(token, current_pos):
+                    encoded_ids.append(self.token_to_id[token])
+                    current_pos += len(token)
+                    match_found = True
+                    break # Found the longest match
+            
+            # If no token from vocab matches, treat as UNK (or handle differently, e.g., char-level)
+            if not match_found:
+                # Simple fallback: treat the single character as UNK
+                # A better approach might involve character-level encoding or BPE later
+                encoded_ids.append(self.unk_token_id)
+                logging.warning(f"Unknown sequence starting at position {current_pos}: '{text[current_pos]}'. Treating as UNK.")
+                current_pos += 1
+
+        encoded_ids.append(self.eos_token_id)
         return torch.LongTensor(encoded_ids)
 
     def decode(self, tensor: torch.Tensor) -> str:
         """
         Decodes a tensor of token IDs back into a string.
-        Filters out PAD, SOS, and EOS tokens.
+        Filters out PAD, SOS, and EOS tokens. Handles newline tokens.
 
         Args:
             tensor (torch.Tensor): A tensor containing the sequence of token IDs.
@@ -105,13 +135,31 @@ class Tokenizer:
                   logging.warning("Decoding a batch tensor, only decoding the first sequence.")
              tensor = tensor[0]
              
-        decoded_tokens = []
-        for token_id in tensor.tolist(): # Convert tensor items to standard Python ints
+        decoded_string = ""
+        for token_id in tensor.tolist():
             if token_id in [self.pad_token_id, self.sos_token_id, self.eos_token_id]:
                 continue
-            decoded_tokens.append(self.id_to_token.get(token_id, "<UNK>")) # Use UNK string if ID is somehow invalid
+                
+            token = self.id_to_token.get(token_id, "<UNK>")
+            
+            # Handle special tokens for formatting
+            if token == "\\n":
+                decoded_string += "\n"
+            # FUTURE: Handle INDENT/DEDENT here to add/remove leading spaces
+            # elif token == "INDENT":
+            #     current_indent += "    " # Or based on config
+            #     decoded_string += "\n" + current_indent # Indent usually follows newline
+            # elif token == "DEDENT":
+            #     current_indent = current_indent[:-4] # Or based on config
+            #     # Dedent might not always follow newline, handle context?
+            else:
+                # Basic joining - needs refinement for spacing around operators/punctuation
+                # Add space unless previous char was newline or it's the start
+                if decoded_string and not decoded_string.endswith('\n'):
+                     decoded_string += " " 
+                decoded_string += token
 
-        return " ".join(decoded_tokens)
+        return decoded_string
 
 # Example usage (optional, for direct script execution testing)
 if __name__ == '__main__':

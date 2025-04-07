@@ -48,31 +48,24 @@ class AttemptFingerprinter:
         return hashlib.md5(normalized.encode('utf-8')).hexdigest()
     
     def _normalize_code(self, code):
-        """Normalize code to ignore non-semantic differences."""
-        # FUTURE INTENT: This normalization is very basic (removing comments/blanks, lowercasing).
-        # More sophisticated normalization could involve:
-        # 1.  AST-based Normalization: Parsing the code into an Abstract Syntax Tree (AST) and then 
-        #     serializing it back into a canonical string format. This ignores variations in whitespace,
-        #     comment content, and potentially variable naming (if alpha-renaming is applied).
-        # 2.  Semantic Hashing: Techniques like SimHashing could be used to generate fingerprints where
-        #     similar code (semantically) results in similar hashes, allowing detection of near-duplicates,
-        #     not just exact duplicates after basic normalization.
-        # 3.  Considering Execution Behavior: Fingerprinting could potentially incorporate aspects of the
-        #     code's execution trace or output for certain inputs, although this is more complex.
+        """Normalize code to ignore non-semantic differences like comments and extraneous whitespace,
+           while preserving case sensitivity."""
+        # FUTURE INTENT: AST-based normalization would be even more robust.
         
-        # Remove comments
-        code = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+        # 1. Remove comments
+        code_no_comments = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
         
-        # Remove blank lines
-        code = re.sub(r'\n\s*\n', '\n', code)
+        # 2. Split into lines
+        lines = code_no_comments.splitlines()
         
-        # Remove leading/trailing whitespace
-        code = code.strip()
+        # 3. Strip whitespace from each line and filter empty lines
+        processed_lines = [line.strip() for line in lines if line.strip()]
         
-        # Convert to lowercase (simplistic but helps for now)
-        # FUTURE INTENT: Lowercasing is too aggressive as it loses case sensitivity which matters in Python.
-        # AST-based normalization would be a much better approach.
-        return code.lower()
+        # 4. Join lines back with a standard newline separator
+        normalized = "\n".join(processed_lines)
+        
+        # 5. Return the normalized code (NO lowercasing)
+        return normalized
     
     def is_duplicate(self, fingerprint):
         """Check if a fingerprint has been seen before.

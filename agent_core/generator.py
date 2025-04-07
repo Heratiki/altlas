@@ -73,6 +73,9 @@ class CodeGenerator:
 
             # Optimizer Hyperparameters
             self.learning_rate = optimizer_config.getfloat('LearningRate', 0.001)
+            self.entropy_coefficient = optimizer_config.getfloat('EntropyCoefficient', 0.01) # Read new param
+            self.gradient_clip_norm = optimizer_config.getfloat('GradientClipNorm', 1.0)    # Read new param
+            self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1) # Read new param
 
             # Paths
             # Paths should be relative to project root defined in config
@@ -106,12 +109,84 @@ class CodeGenerator:
         ).to(self.device)
         logging.info(f"Initialized AltLAS_RNN model with {sum(p.numel() for p in self.model.parameters())} parameters.")
 
+        # Validate Initial Weights
+        self._validate_initial_weights()
+
         # Initialize Optimizer
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         logging.info(f"Initialized Adam optimizer with learning rate: {self.learning_rate}")
 
+        # Initialize EMA baseline for REINFORCE
+        self.baseline = 0.0
+        logging.info(f"Initialized EMA baseline with alpha: {self.baseline_ema_alpha}")
+
+        # Initialize token frequency counter
+        self.token_frequency = {} 
+
         # Attempt to load previous state
         self._load_state() # Call load state during initialization
+
+    def _validate_initial_weights(self, std_threshold=1e-6, max_abs_mean=1.0, entropy_threshold=0.5):
+        """Performs basic sanity checks on initial model weights and output distribution."""
+        logging.info("Validating initial model weights and output distribution...")
+        all_ok = True
+        with torch.no_grad():
+            # --- Weight Parameter Checks ---
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    # ... (existing checks for std, mean, NaN/Inf) ...
+                    mean_val = param.data.mean().item()
+                    std_val = param.data.std().item()
+                    if std_val < std_threshold:
+                        logging.warning(f"  VALIDATION WARNING: Parameter '{name}' has near-zero std ({std_val:.2e}). Weights might be constant.")
+                        all_ok = False
+                    if abs(mean_val) > max_abs_mean:
+                        logging.warning(f"  VALIDATION WARNING: Parameter '{name}' has large absolute mean ({mean_val:.4f}). Potential instability.")
+                        all_ok = False
+                    if torch.isnan(param.data).any() or torch.isinf(param.data).any():
+                        logging.error(f"  VALIDATION ERROR: Parameter '{name}' contains NaN or Inf values!")
+                        all_ok = False
+            # --- End Weight Parameter Checks ---
+
+            # --- Initial Output Distribution Check ---
+            try:
+                self.model.eval() # Ensure model is in eval mode for this check
+                # Create a dummy input (e.g., SOS token)
+                dummy_input = torch.LongTensor([[self.tokenizer.sos_token_id]]).to(self.device)
+                dummy_hidden = self.model.init_hidden(batch_size=1, device=self.device)
+                
+                # Perform a forward pass
+                logits, _ = self.model(dummy_input, dummy_hidden)
+                probabilities = F.softmax(logits.squeeze(), dim=-1)
+                
+                # Calculate entropy: - sum(p * log(p))
+                # Add epsilon for numerical stability
+                log_probabilities = torch.log(probabilities + 1e-9)
+                entropy = -torch.sum(probabilities * log_probabilities).item()
+                
+                # Normalize entropy by log(vocab_size) for a value between 0 and 1
+                # High entropy (near 1) is expected for random initialization
+                max_entropy = torch.log(torch.tensor(self.tokenizer.vocab_size, dtype=torch.float)).item()
+                normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
+                
+                logging.info(f"  Initial Output Normalized Entropy: {normalized_entropy:.4f} (Threshold: > {entropy_threshold})")
+                
+                if normalized_entropy < entropy_threshold:
+                    logging.warning(f"  VALIDATION WARNING: Initial output distribution has low entropy ({normalized_entropy:.4f}). Model might be poorly initialized or vocabulary too small.")
+                    all_ok = False
+                if torch.isnan(probabilities).any() or torch.isinf(probabilities).any():
+                    logging.error(f"  VALIDATION ERROR: Initial output probabilities contain NaN or Inf!")
+                    all_ok = False
+                    
+            except Exception as e:
+                logging.error(f"  VALIDATION ERROR: Failed to check initial output distribution: {e}")
+                all_ok = False
+            # --- End Initial Output Distribution Check ---
+                        
+        if all_ok:
+            logging.info("Initial weight and output validation passed.")
+        else:
+            logging.warning("Initial weight and output validation completed with warnings/errors. Review initialization logs.")
 
     def save_weights(self):
         """Saves the state dictionaries of the model and optimizer."""
@@ -182,18 +257,7 @@ class CodeGenerator:
     def generate(self, task=None, history=None, hint=None):
         """
         Generates a code attempt using the RNN model by sampling token by token.
-
-        Args:
-            task: The current task definition (unused in this basic version).
-            history: History of previous attempts (unused in this basic version).
-            hint: Hint from advisor (unused in this basic version).
-
-        Returns:
-            tuple: (generated_code_string, generated_ids_tensor)
-                   - generated_code_string (str): The decoded code attempt.
-                   - generated_ids_tensor (torch.Tensor): Tensor containing the IDs
-                     of the generated tokens (excluding SOS/EOS).
-                     Shape: (sequence_length,)
+        Also tracks token generation frequency.
         """
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
@@ -243,7 +307,12 @@ class CodeGenerator:
                     # Sample the next token ID based on the probabilities
                     next_token_id = torch.multinomial(probabilities, num_samples=1).item()
 
-                    logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id}")
+                    # --- Token Frequency Tracking ---
+                    token_str = self.tokenizer.id_to_token.get(next_token_id, "<UNK>")
+                    self.token_frequency[token_str] = self.token_frequency.get(token_str, 0) + 1
+                    # --- End Token Frequency Tracking ---
+
+                    logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id} ('{token_str}')")
                     # --- Token Handling ---
                     # 1. Stop if EOS token is generated
                     if next_token_id == self.tokenizer.eos_token_id:
@@ -280,16 +349,8 @@ class CodeGenerator:
 
     def learn(self, reward: float, generated_ids: torch.Tensor):
         """
-        Updates the model weights using the REINFORCE algorithm based on the
-        reward received for a generated sequence. Recalculates log probabilities
-        with gradient tracking enabled.
-
-        Args:
-            reward (float): The scalar reward obtained for the generated sequence.
-                            (In this simple case, the final score is used as the return).
-            generated_ids (torch.Tensor): A tensor containing the IDs of the
-                                          actions (tokens) taken in the generated sequence.
-                                          Shape: (sequence_length,)
+        Updates the model weights using REINFORCE with baseline, entropy regularization,
+        and gradient clipping.
         """
         if generated_ids.numel() == 0:
             logging.warning("Learn called with empty generated_ids tensor. Skipping update.")
@@ -297,42 +358,95 @@ class CodeGenerator:
 
         self.model.train() # Set model to training mode
 
-        # --- Recalculate log probabilities with gradient tracking ---
+        # --- Recalculate log probabilities and get action probabilities ---
         # Prepend SOS token for model input
         sos_tensor = torch.LongTensor([[self.tokenizer.sos_token_id]]).to(self.device)
         # Input sequence for forward pass: [SOS, token1, token2, ..., tokenN-1]
         # Target sequence for loss:       [token1, token2, ..., tokenN] (which is generated_ids)
-        input_seq = torch.cat((sos_tensor, generated_ids.unsqueeze(0)[:, :-1]), dim=1)
+        # Ensure generated_ids is 2D (batch_size, seq_len-1) for slicing
+        if generated_ids.dim() == 1:
+            generated_ids_batched = generated_ids.unsqueeze(0)
+        else:
+            generated_ids_batched = generated_ids
+            
+        # Handle case where generated_ids has only one token (e.g., just EOS)
+        if generated_ids_batched.shape[1] > 0:
+            input_seq = torch.cat((sos_tensor, generated_ids_batched[:, :-1]), dim=1)
+        else: # If only EOS was generated (or empty sequence somehow), input is just SOS
+            input_seq = sos_tensor
+            # If input_seq and generated_ids are empty, we should have returned earlier
+            # but handle defensively
+            if generated_ids_batched.numel() == 0:
+                 logging.warning("Learn called with effectively empty sequence after SOS. Skipping update.")
+                 return
 
-        # Perform forward pass to get logits with gradients
-        # We don't need the hidden state output here
         logits, _ = self.model(input_seq) # Shape: (batch=1, seq_len, vocab_size)
         logits = logits.squeeze(0) # Shape: (seq_len, vocab_size)
 
-        # Calculate log probabilities from logits
+        # Get action probabilities (for entropy) and log probabilities (for policy loss)
+        probabilities = F.softmax(logits, dim=-1)
         log_probabilities = F.log_softmax(logits, dim=-1)
 
         # Select the log probabilities corresponding to the actual generated tokens
-        # generated_ids shape: (seq_len,)
-        # log_probabilities shape: (seq_len, vocab_size)
-        # We need log_prob_actions shape: (seq_len,)
         log_prob_actions = log_probabilities[range(generated_ids.shape[0]), generated_ids]
         # --- End Recalculation ---
 
-        # REINFORCE loss: - (sum of log_prob_actions * reward)
-        loss = -torch.sum(log_prob_actions) * reward
-        loss = loss.to(self.device) # Ensure loss is on the correct device
+        # --- Calculate Advantage and Update Baseline ---
+        advantage = float(reward) - self.baseline
+        # Update baseline using EMA
+        self.baseline = self.baseline_ema_alpha * float(reward) + (1 - self.baseline_ema_alpha) * self.baseline
+        logging.debug(f"  Reward: {reward:.4f}, Baseline: {self.baseline:.4f}, Advantage: {advantage:.4f}")
+        # --- End Advantage Calculation ---
 
-        logging.debug(f"Calculated loss: {loss.item()} for reward: {reward}")
+        # --- Calculate Loss ---
+        # 1. Policy Gradient Loss (REINFORCE with baseline)
+        # Use advantage instead of raw reward
+        policy_loss = -torch.sum(log_prob_actions * advantage)
+        
+        # 2. Entropy Bonus Calculation
+        # Entropy = - sum(p * log(p)) for each step
+        # We want to maximize entropy, so we minimize negative entropy
+        # Add a small epsilon to prevent log(0)
+        entropy = -torch.sum(probabilities * torch.log(probabilities + 1e-9), dim=-1)
+        entropy_bonus = -torch.sum(entropy) # Sum entropy over the sequence
+        
+        # 3. Total Loss
+        # Minimize policy loss and negative entropy bonus
+        loss = policy_loss + self.entropy_coefficient * entropy_bonus
+        loss = loss.to(self.device)
+        # --- End Calculate Loss ---
+
+        current_loss = loss.item()
+        policy_loss_val = policy_loss.item()
+        entropy_bonus_val = entropy_bonus.item()
+        logging.info(f"Learn Step: Reward={reward:.4f}, Baseline={self.baseline:.4f}, Advantage={advantage:.4f}")
+        logging.info(f"  Total Loss={current_loss:.4f} (Policy={policy_loss_val:.4f}, EntropyBonus={entropy_bonus_val:.4f} * {self.entropy_coefficient})")
 
         # Perform optimization step
-        self.optimizer.zero_grad() # Clear previous gradients
-        loss.backward()           # Calculate gradients
-        # Optional: Gradient clipping can help stabilize training
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        self.optimizer.step()      # Update model parameters
-
+        self.optimizer.zero_grad()
+        loss.backward()
+        
+        # --- Gradient Monitoring & Clipping ---
+        total_norm = 0
+        for p in self.model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+        logging.info(f"  Gradient Norm (Before Clip): {total_norm:.4f}")
+        
+        # Apply gradient clipping if norm > 0
+        if self.gradient_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip_norm)
+            # Optionally log norm after clipping
+            # total_norm_after_clip = 0
+            # for p in self.model.parameters():
+            #     if p.grad is not None:
+            #         param_norm = p.grad.data.norm(2)
+            #         total_norm_after_clip += param_norm.item() ** 2
+            # total_norm_after_clip = total_norm_after_clip ** 0.5
+            # logging.info(f"  Gradient Norm (After Clip): {total_norm_after_clip:.4f}")
+        # --- End Gradient Monitoring & Clipping ---
+        
+        self.optimizer.step()
         logging.debug("Optimizer step performed.")
-
-
-# Removed leftover return statement and comment

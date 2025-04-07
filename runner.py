@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 import random # Added for hint simulation
 import configparser # Added
+import argparse # Import argparse
 
 # Rich UI components
 from rich.console import Console
@@ -166,12 +167,12 @@ def call_llm_api(prompt: str) -> Optional[str]:
 def call_local_llm(prompt: str) -> Optional[str]:
     """
     Call a local LLM using LM Studio running on the host machine.
-    Uses host.docker.internal to connect from within the container.
+    Uses localhost to connect with --network=host container mode.
     """
     try:
-        # Always use host.docker.internal in this Docker-based setup
-        base_url = "http://host.docker.internal:1234/v1"
-        print("🐳 Using host.docker.internal to connect to LM Studio")
+        # With --network=host, localhost in the container is the same as on the host
+        base_url = "http://localhost:1234/v1"
+        print("🌐 Using localhost with network=host to connect to LM Studio")
         
         # First, get the list of available models
         headers = {
@@ -193,8 +194,8 @@ def call_local_llm(prompt: str) -> Optional[str]:
                 # Choose an appropriate model (prefer code-oriented models if available)
                 chosen_model = None
                 preferred_models = [
-                    "codellama", "code-llama", "wizardcoder", "stable-code", "phi-2",
-                    "mistral", "mixtral", "llama3", "llama-3", "llama2", "llama-2"
+                    "wizardcoder", "codellama", "code-llama", "stable-code", 
+                    "starcoder", "olympiccoder", "qwen2.5-coder"
                 ]
                 
                 # Look for preferred models
@@ -328,9 +329,17 @@ def generate_static_hint(prompt: str) -> str:
 
 def main():
     """Main runner function that orchestrates the AltLAS workflow."""
+    # --- Argument Parsing ---
+    parser = argparse.ArgumentParser(description="Run the AltLAS Learning Agent.")
+    parser.add_argument("--task", type=str, default="hello_world", 
+                        help="Name of the task JSON file to load (without .json extension). Defaults to hello_world.")
+    args = parser.parse_args()
+    task_to_load = args.task
+    # --- End Argument Parsing ---
+
     # Initialize Rich console
     console = Console()
-    console.print("[bold blue]🧠 Starting AltLAS - Learning Agent[/bold blue]")
+    console.print(f"[bold blue]🧠 Starting AltLAS - Task: {task_to_load}[/bold blue]")
 
     # --- Read Config ---
     config = configparser.ConfigParser()
@@ -346,11 +355,15 @@ def main():
         max_attempts = runner_config.getint('MaxAttempts', 1000)
         stuck_check_window = runner_config.getint('StuckCheckWindow', 15)
         stuck_threshold = runner_config.getfloat('StuckThreshold', 0.01)
+        hint_probability_on_stuck = runner_config.getfloat('HintProbabilityOnStuck', 1.0)
+        max_consecutive_stuck_checks = runner_config.getint('MaxConsecutiveStuckChecks', 3) # Read new param
+        log_frequency = runner_config.getint('LogFrequency', 500) # Read new param
+        top_tokens_to_log = runner_config.getint('TopTokensToLog', 10) # Read new param
 
         scorer_config = config['Scorer']
         success_threshold = scorer_config.getfloat('SuccessThreshold', 0.99)
     except KeyError as e:
-        console.print(f"[bold red]Error: Missing section in {config_path}: {e}[/bold red]")
+        console.print(f"[bold red]Error: Missing section or key in {config_path}: {e}[/bold red]")
         sys.exit(1)
     except ValueError as e:
         console.print(f"[bold red]Error: Invalid value type in {config_path}: {e}[/bold red]")
@@ -361,10 +374,14 @@ def main():
     device = get_pytorch_device() # <-- Determine device
     # --- End Determine Device ---
     
-    # 1. Load task
+    # 1. Load task using the name from command-line args or default
     task_loader = TaskLoader()
-    current_task = task_loader.load_task("hello_world")
-    console.print(f"[bold green]📋 Loaded task: {current_task.name}[/bold green]")
+    try:
+        current_task = task_loader.load_task(task_to_load)
+        console.print(f"[bold green]📋 Loaded task: {current_task.name}[/bold green] - {current_task.description}")
+    except ValueError as e:
+        console.print(f"[bold red]Error loading task '{task_to_load}': {e}[/bold red]")
+        sys.exit(1)
     
     # 2. Initialize components, passing config path as string
     generator = CodeGenerator(config_path=str(config_path), device=device) # <-- Pass device
@@ -380,6 +397,7 @@ def main():
     # Stuck detection parameters
     last_best_score_at_check = 0.0
     attempts_since_last_check = 0
+    consecutive_stuck_count = 0 # Initialize consecutive stuck counter
     current_hint = None
     
     # Keep track of status messages for display
@@ -388,6 +406,8 @@ def main():
     unsafe_count = 0
     error_count = 0
     success_count = 0
+    hints_requested = 0 # Add counter for hints requested
+    hints_provided = 0  # Add counter for hints provided
     
     # Create the Rich layout
     layout = Layout()
@@ -425,15 +445,54 @@ def main():
                 # Update header with progress
                 layout["header"].update(Panel(progress, title="AltLAS Progress", border_style="blue"))
                 
+                # --- Periodic Logging ---
+                if log_frequency > 0 and attempt_count % log_frequency == 0:
+                    if hasattr(generator, 'token_frequency') and generator.token_frequency:
+                        sorted_freq = sorted(generator.token_frequency.items(), key=lambda item: item[1], reverse=True)
+                        top_n = sorted_freq[:top_tokens_to_log]
+                        freq_str = ", ".join([f"'{token}': {count}" for token, count in top_n])
+                        console.log(f"[Attempt {attempt_count}] Top {top_tokens_to_log} generated tokens: {freq_str}")
+                    else:
+                        console.log(f"[Attempt {attempt_count}] Token frequency data not available yet.")
+                # --- End Periodic Logging ---
+
                 # --- Stuck Detection & Hinting ---
                 if attempts_since_last_check >= stuck_check_window:
                     current_best_score = logger.get_best_score()
+                    # Check if score has improved enough
                     if current_best_score - last_best_score_at_check < stuck_threshold:
-                        current_hint = get_hint_from_advisor(current_task, logger.get_history())
-                        if current_hint:
-                            status_messages.insert(0, f"🤔 [{time.strftime('%H:%M:%S')}] Hint requested: {current_hint}")
+                        consecutive_stuck_count += 1 # Increment consecutive stuck counter
+                        status_messages.insert(0, f"📉 [{time.strftime('%H:%M:%S')}] Stuck detected (Check {consecutive_stuck_count}/{max_consecutive_stuck_checks}). Score hasn't improved enough.")
+                        
+                        # Check if stuck for long enough
+                        if consecutive_stuck_count >= max_consecutive_stuck_checks:
+                            # Only request a hint based on probability
+                            if random.random() < hint_probability_on_stuck:
+                                hints_requested += 1 # Increment hints requested counter
+                                current_hint = get_hint_from_advisor(current_task, logger.get_history())
+                                if current_hint:
+                                    hints_provided += 1 # Increment hints provided counter
+                                    status_messages.insert(0, f"🤔 [{time.strftime('%H:%M:%S')}] Hint requested (Prob: {hint_probability_on_stuck:.2f}): {current_hint}")
+                                else:
+                                    status_messages.insert(0, f"🤷 [{time.strftime('%H:%M:%S')}] Advisor couldn't generate hint (Prob: {hint_probability_on_stuck:.2f})")
+                                # Reset counter after hint attempt to avoid immediate re-hinting
+                                consecutive_stuck_count = 0 
+                            else:
+                                status_messages.insert(0, f"🚫 [{time.strftime('%H:%M:%S')}] Hint skipped due to probability ({hint_probability_on_stuck:.2f}) despite meeting consecutive stuck threshold.")
+                                current_hint = None # Ensure hint is None if skipped
+                                # Optionally reset counter here too, or let it keep counting
+                                # consecutive_stuck_count = 0 
+                        else:
+                            # Stuck, but not for long enough consecutively
+                            current_hint = None # Ensure hint is None
                     else:
-                         current_hint = None 
+                        # Score improved enough, reset consecutive stuck counter
+                        if consecutive_stuck_count > 0:
+                             status_messages.insert(0, f"📈 [{time.strftime('%H:%M:%S')}] Progress detected. Resetting consecutive stuck counter.")
+                        consecutive_stuck_count = 0 
+                        current_hint = None 
+                        
+                    # Always update the score baseline and reset the attempt window counter
                     last_best_score_at_check = current_best_score
                     attempts_since_last_check = 0
                 # --- End Stuck Detection ---
@@ -459,7 +518,8 @@ def main():
                     
                 fingerprint = fingerprinter.get_fingerprint(code_attempt)
                 if fingerprinter.is_duplicate(fingerprint):
-                    status_messages.insert(0, f"🔄 [{time.strftime('%H:%M:%S')}] Duplicate attempt {attempt_count} detected, skipping execution")
+                    # Add fingerprint hash to the status message for debugging
+                    status_messages.insert(0, f"🔄 [{time.strftime('%H:%M:%S')}] Duplicate attempt {attempt_count} detected (FP: {fingerprint[:8]}...), skipping execution")
                     duplicate_count += 1
                     continue
                 
@@ -501,6 +561,8 @@ def main():
                 stats_table.add_row("Unsafe Attempts", str(unsafe_count))
                 stats_table.add_row("Error Attempts", str(error_count))
                 stats_table.add_row("Success Attempts", str(success_count))
+                stats_table.add_row("Hints Requested", str(hints_requested)) # Add hints requested
+                stats_table.add_row("Hints Provided", str(hints_provided))   # Add hints provided
                 
                 # Task details
                 stats_table.add_row("", "")  # Empty row for spacing
@@ -540,6 +602,24 @@ def main():
             generator.save_weights()
         # --- End Save Weights ---
 
+        # --- Log Final Token Frequencies --- 
+        if hasattr(generator, 'token_frequency') and generator.token_frequency:
+            console.print("[bold blue]Final Generated Token Frequencies:[/bold blue]")
+            # Sort for consistent output
+            sorted_final_freq = sorted(generator.token_frequency.items(), key=lambda item: item[1], reverse=True)
+            # Use Rich Table for better formatting
+            freq_table = Table(title="Token Frequencies", show_header=True, header_style="bold magenta")
+            freq_table.add_column("Token", style="dim")
+            freq_table.add_column("Count", justify="right")
+            for token, count in sorted_final_freq:
+                 # Escape special characters like newlines for display
+                 display_token = repr(token).strip("'")
+                 freq_table.add_row(display_token, str(count))
+            console.print(freq_table)
+        else:
+            console.print("[yellow]No token frequency data collected.[/yellow]")
+        # --- End Log Final Token Frequencies ---
+
         # 4. Summarize results
         summary = []
         if success:
@@ -551,7 +631,18 @@ def main():
         
         # Ensure logger exists before getting best score
         if 'logger' in locals():
-            summary.append(f"[bold blue]📈 Best score achieved: {logger.get_best_score():.2f}[/bold blue]")
+            best_score_val, best_attempt_num = logger.get_best_score_info()
+            summary.append(f"[bold blue]📈 Best score achieved: {best_score_val:.2f}[/bold blue] (Attempt {best_attempt_num})")
+        
+        # Add final run statistics
+        summary.append("\n[bold]Run Statistics:[/bold]")
+        summary.append(f"  - Total Attempts: {attempt_count}")
+        summary.append(f"  - Success Attempts: {success_count}")
+        summary.append(f"  - Error Attempts: {error_count}")
+        summary.append(f"  - Duplicate Attempts: {duplicate_count}")
+        summary.append(f"  - Unsafe Attempts: {unsafe_count}")
+        summary.append(f"  - Hints Requested: {hints_requested}")
+        summary.append(f"  - Hints Provided: {hints_provided}")
         
         # Print summary
         console.print(Panel("\n".join(summary), title="Run Summary", border_style="bold"))

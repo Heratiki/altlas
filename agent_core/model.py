@@ -1,6 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.init as init # Import init module
+import logging # Import logging
 from typing import Tuple
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class AltLAS_RNN(nn.Module):
     """
@@ -36,6 +41,45 @@ class AltLAS_RNN(nn.Module):
         # Layer 3: Linear layer (Output layer)
         # Maps LSTM hidden states to logits over the vocabulary.
         self.fc = nn.Linear(hidden_dim, vocab_size)
+        
+        # Initialize weights explicitly
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        """Initialize model weights using standard methods."""
+        logging.info("Initializing model weights...")
+        # Initialize Embedding layer
+        init.xavier_uniform_(self.embedding.weight)
+        logging.info(f"  Embedding weights initialized (Xavier Uniform). Shape: {self.embedding.weight.shape}")
+        logging.info(f"    Mean: {self.embedding.weight.mean():.4f}, Std: {self.embedding.weight.std():.4f}, Min: {self.embedding.weight.min():.4f}, Max: {self.embedding.weight.max():.4f}")
+
+        # Initialize Linear layer
+        init.xavier_uniform_(self.fc.weight)
+        init.zeros_(self.fc.bias)
+        logging.info(f"  Linear FC weights initialized (Xavier Uniform). Shape: {self.fc.weight.shape}")
+        logging.info(f"    Mean: {self.fc.weight.mean():.4f}, Std: {self.fc.weight.std():.4f}, Min: {self.fc.weight.min():.4f}, Max: {self.fc.weight.max():.4f}")
+        logging.info(f"  Linear FC bias initialized (Zeros). Shape: {self.fc.bias.shape}")
+
+        # LSTM layers are often initialized reasonably by default, 
+        # but we can initialize their linear components if needed.
+        # Example for LSTM weights (more complex due to gates):
+        for name, param in self.lstm.named_parameters():
+            if 'weight_ih' in name:
+                init.xavier_uniform_(param.data)
+                logging.info(f"  LSTM {name} initialized (Xavier Uniform). Shape: {param.shape}")
+                logging.info(f"    Mean: {param.data.mean():.4f}, Std: {param.data.std():.4f}, Min: {param.data.min():.4f}, Max: {param.data.max():.4f}")
+            elif 'weight_hh' in name:
+                init.orthogonal_(param.data) # Orthogonal is common for recurrent weights
+                logging.info(f"  LSTM {name} initialized (Orthogonal). Shape: {param.shape}")
+                logging.info(f"    Mean: {param.data.mean():.4f}, Std: {param.data.std():.4f}, Min: {param.data.min():.4f}, Max: {param.data.max():.4f}")
+            elif 'bias' in name:
+                param.data.fill_(0)
+                # Setting forget gate bias to 1 can sometimes help learning
+                n = param.size(0)
+                start, end = n // 4, n // 2
+                param.data[start:end].fill_(1.)
+                logging.info(f"  LSTM {name} initialized (Zeros, forget gate bias=1). Shape: {param.shape}")
+        logging.info("Weight initialization complete.")
 
     def forward(self, input_seq: torch.Tensor, hidden_state: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """

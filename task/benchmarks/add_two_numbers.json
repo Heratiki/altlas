@@ -1,0 +1,9 @@
+{
+    "name": "benchmark_add_two_numbers",
+    "description": "Benchmark task: Generate code that prints the sum of 5 and 3.",
+    "success_criteria": {
+        "type": "exact_output",
+        "exact_output": "8",
+        "case_sensitive": true
+    }
+}

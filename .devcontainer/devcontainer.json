@@ -1,19 +1,41 @@
 {
-    "name": "AltLAS Dev",
-    "build": {
-      "dockerfile": "Dockerfile"
-    },
-    "settings": {
-      "terminal.integrated.defaultProfile.linux": "bash",
-      "editor.formatOnSave": true
-    },
-    "extensions": [
-      "ms-python.python",
-      "ms-toolsai.jupyter",
-      "github.copilot",
-      "ms-vscode.makefile-tools"
-    ],
-    "forwardPorts": [8888],
-    "remoteUser": "vscode"
-  }
+  "name": "AltLAS Dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.formatOnSave": true
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "github.copilot",
+        "ms-vscode.makefile-tools"
+      ]
+    }
+  },
+  "remoteUser": "vscode",
+  "hostRequirements": {
+    "memory": "8gb"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {}
+  },
+  // Remove this mounts section - it's redundant with the default workspace mount
+  // "mounts": [
+  //   "source=${localWorkspaceFolder},target=${containerWorkspaceFolder},type=bind,consistency=cached"
+  // ],
+  "forwardPorts": [
+    8888,
+    1234
+  ],
+  "postCreateCommand": "pip install requests ipykernel",
   
+  // Keep just one networking option
+  "runArgs": [
+    "--network=host"
+  ]
+}

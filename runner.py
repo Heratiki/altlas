@@ -46,10 +46,11 @@ except ImportError as e:
 # --- Centralized Logging Setup ---
 LOG_FILENAME = "altlas_run.log"
 LOG_LEVEL_FILE = logging.DEBUG # Log DEBUG and higher to file
-LOG_LEVEL_CONSOLE = logging.INFO # Log INFO and higher to console
+LOG_LEVEL_CONSOLE = logging.CRITICAL # Only log CRITICAL to console, preventing UI flickering
 
-# Create console object for RichHandler
-console = Console()
+# Create separate console objects for logging and for the Live display
+log_console = Console(stderr=True)  # Use stderr for logging to avoid conflicts
+ui_console = Console()  # Use stdout for the Live UI display
 
 # Configure root logger
 log = logging.getLogger() # Get root logger
@@ -64,9 +65,8 @@ file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=5*1024*1024, backupCou
 file_handler.setFormatter(file_formatter)
 file_handler.setLevel(LOG_LEVEL_FILE) # File handler captures DEBUG+ 
 
-# Console Handler (Rich)
-# Uses default Rich formatting, shows INFO+
-console_handler = RichHandler(console=console, rich_tracebacks=True, show_path=False, level=LOG_LEVEL_CONSOLE) # Console handler captures INFO+
+# Console Handler (Rich) - Only for CRITICAL messages
+console_handler = RichHandler(console=log_console, rich_tracebacks=True, show_path=False, level=LOG_LEVEL_CONSOLE) # Console handler captures CRITICAL only
 
 # Remove existing handlers if any (important for re-running in interactive sessions)
 for handler in log.handlers[:]:
@@ -136,14 +136,14 @@ Focus on ONE problem at a time. Limit your hint to one or two sentences.
         hint = call_llm_api(prompt)
         
         if hint:
-            print(f"💡 Advisor Hint: {hint}")
+            log.info(f"💡 Advisor Hint: {hint}")
             return hint
         else:
-            print("🤷 Advisor could not generate a hint")
+            log.info("🤷 Advisor could not generate a hint")
             return None
             
     except Exception as e:
-        print(f"⚠️ Error getting hint from advisor: {str(e)}")
+        log.error(f"⚠️ Error getting hint from advisor: {str(e)}")
         # Fallback to a generic hint if the API call fails
         return "Try a different approach."
 
@@ -196,11 +196,11 @@ def call_llm_api(prompt: str) -> Optional[str]:
             hint = response_data['choices'][0]['message']['content'].strip()
             return hint
         else:
-            print(f"API error: {response.status_code} - {response.text}")
+            log.error(f"API error: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        print(f"Error calling LLM API: {str(e)}")
+        log.error(f"Error calling LLM API: {str(e)}")
         return None
 
 def call_local_llm(prompt: str) -> Optional[str]:
@@ -211,7 +211,7 @@ def call_local_llm(prompt: str) -> Optional[str]:
     try:
         # With --network=host, localhost in the container is the same as on the host
         base_url = "http://localhost:1234/v1"
-        print("🌐 Using localhost with network=host to connect to LM Studio")
+        log.info("🌐 Using localhost with network=host to connect to LM Studio")
         
         # First, get the list of available models
         headers = {
@@ -228,7 +228,7 @@ def call_local_llm(prompt: str) -> Optional[str]:
             if models_response.status_code == 200:
                 models_data = models_response.json()
                 available_models = [model["id"] for model in models_data.get("data", [])]
-                print(f"🤖 Available LM Studio models: {available_models}")
+                log.info(f"🤖 Available LM Studio models: {available_models}")
                 
                 # Choose an appropriate model (prefer code-oriented models if available)
                 chosen_model = None
@@ -251,15 +251,15 @@ def call_local_llm(prompt: str) -> Optional[str]:
                     chosen_model = available_models[0]
                 
                 if not chosen_model:
-                    print("⚠️ No models available in LM Studio")
+                    log.warning("⚠️ No models available in LM Studio")
                     return generate_static_hint(prompt)
                     
-                print(f"🧠 Using LM Studio model: {chosen_model}")
+                log.info(f"🧠 Using LM Studio model: {chosen_model}")
             else:
-                print(f"⚠️ Failed to retrieve models from LM Studio: {models_response.status_code} - {models_response.text}")
+                log.warning(f"⚠️ Failed to retrieve models from LM Studio: {models_response.status_code} - {models_response.text}")
                 return generate_static_hint(prompt)
         except Exception as model_e:
-            print(f"⚠️ Error querying available models: {str(model_e)}")
+            log.warning(f"⚠️ Error querying available models: {str(model_e)}")
             return generate_static_hint(prompt)
             
         # Now make the actual API call for completion
@@ -288,11 +288,11 @@ def call_local_llm(prompt: str) -> Optional[str]:
             hint = response_data['choices'][0]['message']['content'].strip()
             return hint
         else:
-            print(f"⚠️ Local LLM API error: {response.status_code} - {response.text}")
+            log.warning(f"⚠️ Local LLM API error: {response.status_code} - {response.text}")
             return generate_static_hint(prompt)
             
     except Exception as e:
-        print(f"⚠️ Error calling local LLM: {str(e)}")
+        log.warning(f"⚠️ Error calling local LLM: {str(e)}")
         return generate_static_hint(prompt)
 
 def generate_static_hint(prompt: str) -> str:
@@ -376,16 +376,16 @@ def main():
     task_to_load = args.task
     # --- End Argument Parsing ---
 
-    # Use the PREVIOUSLY created console object
-    log.info(f"🧠 Starting AltLAS - Task: {task_to_load}") 
-    log.debug("Debug logging is active and directed to file.") # Example debug message
+    # Use the standard logger. RichHandler will format INFO+ messages for the console.
+    log.info(f"🧠 Starting AltLAS - Task: {task_to_load}")
+    log.debug("Debug logging is active and directed to file.")
 
     # --- Read Config ---
     config = configparser.ConfigParser()
     # Define config path relative to the runner script
     config_path = Path(__file__).parent / "config.ini" 
     if not config_path.exists():
-        console.print(f"[bold red]Error: Configuration file not found at {config_path}[/bold red]")
+        log_console.print(f"[bold red]Error: Configuration file not found at {config_path}[/bold red]")
         sys.exit(1)
     config.read(config_path)
     
@@ -402,10 +402,10 @@ def main():
         scorer_config = config['Scorer']
         success_threshold = scorer_config.getfloat('SuccessThreshold', 0.99)
     except KeyError as e:
-        console.print(f"[bold red]Error: Missing section or key in {config_path}: {e}[/bold red]")
+        log_console.print(f"[bold red]Error: Missing section or key in {config_path}: {e}[/bold red]")
         sys.exit(1)
     except ValueError as e:
-        console.print(f"[bold red]Error: Invalid value type in {config_path}: {e}[/bold red]")
+        log_console.print(f"[bold red]Error: Invalid value type in {config_path}: {e}[/bold red]")
         sys.exit(1)
     # --- End Read Config ---
     
@@ -417,9 +417,12 @@ def main():
     task_loader = TaskLoader()
     try:
         current_task = task_loader.load_task(task_to_load)
-        console.print(f"[bold green]📋 Loaded task: {current_task.name}[/bold green] - {current_task.description}")
+        # Log task loading info
+        log.info(f"📋 Loaded task: {current_task.name} - {current_task.description}")
     except ValueError as e:
-        console.print(f"[bold red]Error loading task '{task_to_load}': {e}[/bold red]")
+        # Log error and exit
+        log.error(f"Error loading task '{task_to_load}': {e}", exc_info=True)
+        # log_console.print(f"[bold red]Error loading task '{task_to_load}': {e}[/bold red]") # Keep direct print for fatal startup error
         sys.exit(1)
     
     # 2. Initialize components, passing config path as string
@@ -474,8 +477,8 @@ def main():
     run_exception = None     # Store any unexpected exception
     
     try:
-        # Pass the SAME console object to Live and set transient=True
-        with Live(layout, refresh_per_second=10, console=console, transient=True) as live:
+        # Use the UI console object for Live display with reduced refresh rate
+        with Live(layout, refresh_per_second=4, console=ui_console, transient=True) as live:
             # 3. Main learning loop
             while attempt_count < max_attempts and not success:
                 try:
@@ -489,13 +492,56 @@ def main():
                     
                     # ... (Periodic Logging) ...
                     if log_frequency > 0 and attempt_count % log_frequency == 0:
-                        # ... (log token frequency) ...
-                        pass # Placeholder for brevity
+                        if hasattr(generator, 'token_frequency') and generator.token_frequency:
+                            sorted_freq = sorted(generator.token_frequency.items(), key=lambda item: item[1], reverse=True)
+                            top_n = sorted_freq[:top_tokens_to_log]
+                            freq_str = ", ".join([f"'{token}': {count}" for token, count in top_n])
+                            # Log this as INFO to appear on console via RichHandler
+                            log.info(f"[Attempt {attempt_count}] Top {top_tokens_to_log} generated tokens: {freq_str}") 
+                        # Log detailed info to file only
+                        log.debug(f"Attempt {attempt_count} full token frequencies: {generator.token_frequency}")
 
                     # ... (Stuck Detection & Hinting) ...
                     if attempts_since_last_check >= stuck_check_window:
-                        # ... (stuck logic) ...
-                        pass # Placeholder for brevity
+                        current_best_score = logger.get_best_score()
+                        if current_best_score - last_best_score_at_check < stuck_threshold:
+                            consecutive_stuck_count += 1
+                            # Add to status messages instead of logging to console
+                            status_messages.insert(0, f"📉 [{time.strftime('%H:%M:%S')}] Stuck detected (Check {consecutive_stuck_count}/{max_consecutive_stuck_checks})")
+                            # Still log to file
+                            log.info(f"📉 Stuck detected (Check {consecutive_stuck_count}/{max_consecutive_stuck_checks}). Score hasn't improved enough.")
+                            
+                            if consecutive_stuck_count >= max_consecutive_stuck_checks:
+                                if random.random() < hint_probability_on_stuck:
+                                    current_hint = get_hint_from_advisor(current_task, logger.get_history())
+                                    if current_hint:
+                                        # Add to status messages instead of logging to console
+                                        status_messages.insert(0, f"🤔 [{time.strftime('%H:%M:%S')}] Hint requested: {current_hint[:50]}...")
+                                        # Still log to file
+                                        log.info(f"🤔 Hint requested (Prob: {hint_probability_on_stuck:.2f}): {current_hint}")
+                                        hints_requested += 1
+                                        hints_provided += 1 # Assuming hint was provided if not None
+                                    else:
+                                        # Add to status messages instead of logging to console
+                                        status_messages.insert(0, f"🤷 [{time.strftime('%H:%M:%S')}] Advisor couldn't generate hint")
+                                        # Still log to file
+                                        log.warning(f"🤷 Advisor couldn't generate hint (Prob: {hint_probability_on_stuck:.2f})")
+                                        hints_requested += 1
+                                    consecutive_stuck_count = 0 
+                                else:
+                                    # Only log to file
+                                    log.info(f"🚫 Hint skipped due to probability ({hint_probability_on_stuck:.2f}) despite meeting consecutive stuck threshold.")
+                                    current_hint = None
+                            else:
+                                current_hint = None
+                        else:
+                            if consecutive_stuck_count > 0:
+                                 # Only log to file
+                                 log.info(f"📈 Progress detected. Resetting consecutive stuck counter.")
+                            consecutive_stuck_count = 0 
+                            current_hint = None 
+                        last_best_score_at_check = current_best_score
+                        attempts_since_last_check = 0
 
                     # ... (Generate Code) ...
                     code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint)
@@ -505,13 +551,22 @@ def main():
 
                     # ... (Safety/Novelty Check) ...
                     if not safety_checker.is_safe(code_attempt):
-                        # ... (log unsafe) ...
-                        continue
-                    fingerprint = fingerprinter.get_fingerprint(code_attempt)
-                    if fingerprinter.is_duplicate(fingerprint):
-                        # ... (log duplicate) ...
+                        # Add to status messages instead of logging to console
+                        status_messages.insert(0, f"⚠️ [{time.strftime('%H:%M:%S')}] Unsafe code attempt detected. Skipping.")
+                        # Log to file
+                        log.warning(f"⚠️ Unsafe code attempt detected at attempt {attempt_count}. Skipping.")
+                        unsafe_count += 1
                         continue
                     
+                    fingerprint = fingerprinter.get_fingerprint(code_attempt)
+                    if fingerprinter.is_duplicate(fingerprint):
+                        # Add to status messages instead of logging to console  
+                        status_messages.insert(0, f"⚠️ [{time.strftime('%H:%M:%S')}] Duplicate code attempt detected. Skipping.")
+                        # Log to file
+                        log.warning(f"⚠️ Duplicate code attempt detected at attempt {attempt_count}. Skipping.")
+                        duplicate_count += 1
+                        continue
+
                     # ... (Execute Code) ...
                     result = executor.execute(code_attempt)
                     
@@ -519,6 +574,11 @@ def main():
                     score = scorer.score(result, current_task)
                     
                     # ... (Update status message) ...
+                    status_messages.insert(0, f"📝 [{time.strftime('%H:%M:%S')}] Attempt {attempt_count} scored {score:.2f}")
+                    if score >= success_threshold:
+                        success_count += 1
+                    else:
+                        error_count += 1
                     
                     # ... (Log Attempt) ...
                     logger.log_attempt(attempt_count, code_attempt, result, score, fingerprint)
@@ -529,7 +589,11 @@ def main():
                     # --- Update Rich UI --- 
                     best_score_val, best_attempt_num = logger.get_best_score_info()
                     stats_table = Table(show_header=False, box=None)
-                    # ... (add rows to stats_table) ...
+                    stats_table.add_row("Total Attempts", str(attempt_count))
+                    stats_table.add_row("Success Attempts", str(success_count))
+                    stats_table.add_row("Error Attempts", str(error_count))
+                    stats_table.add_row("Duplicate Attempts", str(duplicate_count))
+                    stats_table.add_row("Unsafe Attempts", str(unsafe_count))
                     stats_table.add_row("Hints Requested", str(hints_requested))
                     stats_table.add_row("Hints Provided", str(hints_provided))
                     layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
@@ -587,7 +651,7 @@ def main():
 
         # --- Log Final Token Frequencies --- 
         if hasattr(generator, 'token_frequency') and generator.token_frequency:
-            console.print("[bold blue]Final Generated Token Frequencies:[/bold blue]")
+            ui_console.print("[bold blue]Final Generated Token Frequencies:[/bold blue]")
             # Sort for consistent output
             sorted_final_freq = sorted(generator.token_frequency.items(), key=lambda item: item[1], reverse=True)
             # Use Rich Table for better formatting
@@ -598,9 +662,9 @@ def main():
                  # Escape special characters like newlines for display
                  display_token = repr(token).strip("'")
                  freq_table.add_row(display_token, str(count))
-            console.print(freq_table)
+            ui_console.print(freq_table)
         else:
-            console.print("[yellow]No token frequency data collected.[/yellow]")
+            ui_console.print("[yellow]No token frequency data collected.[/yellow]")
         # --- End Log Final Token Frequencies ---
 
         # 4. Summarize results
@@ -632,7 +696,7 @@ def main():
         summary.append(f"  - Hints Provided: {hints_provided}")
         
         # Print summary
-        console.print(Panel("\n".join(summary), title="Run Summary", border_style="bold"))
+        ui_console.print(Panel("\n".join(summary), title="Run Summary", border_style="bold"))
 
 if __name__ == "__main__":
     main()

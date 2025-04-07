@@ -74,6 +74,21 @@ Thumbs.db
 # ONNX model files (might be large)
 *.onnx
 
+# Model memory files
+*.pth
+
 # Temporary files
 tmp/
 temp/
+
+# Log Files
+*.log
+*.log.*
+*.out
+*.out.*
+*.err
+*.err.*
+
+# Backup files
+*.bak
+*.tmp

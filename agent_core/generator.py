@@ -156,6 +156,29 @@ class CodeGenerator:
         except Exception as e:
             logging.error(f"Error loading model/optimizer state: {e}. Starting with fresh state.")
 
+
+    def _parse_hint(self, hint: str) -> set:
+        """Parses a hint string to find relevant token IDs from the vocabulary."""
+        if not hint:
+            return set()
+
+        hinted_token_ids = set()
+        # Simple word extraction (lowercase)
+        hint_words = set(word.strip('.,!?"\'`)') for word in hint.lower().split())
+
+        for token, token_id in self.tokenizer.token_to_id.items():
+            # Check if the token (stripped of quotes for literals) is in the hint words
+            token_text = token.strip('"')
+            if token_text in hint_words:
+                hinted_token_ids.add(token_id)
+                logging.debug(f"Hint '{hint}' matched token: '{token}' (ID: {token_id})")
+            # Additionally check if parts of multi-word tokens match (e.g., 'hello' in '"hello"')
+            elif token_text and token_text in hint: # Avoid matching empty strings
+                 hinted_token_ids.add(token_id)
+                 logging.debug(f"Hint '{hint}' contained token text: '{token_text}' (ID: {token_id})")
+
+        return hinted_token_ids
+
     def generate(self, task=None, history=None, hint=None):
         """
         Generates a code attempt using the RNN model by sampling token by token.
@@ -166,100 +189,139 @@ class CodeGenerator:
             hint: Hint from advisor (unused in this basic version).
 
         Returns:
-            tuple: (generated_code_string, log_probabilities_tensor)
+            tuple: (generated_code_string, generated_ids_tensor)
                    - generated_code_string (str): The decoded code attempt.
-                   - log_probabilities_tensor (torch.Tensor): Tensor containing the
-                     log probability of each *generated* token (excluding SOS/EOS).
+                   - generated_ids_tensor (torch.Tensor): Tensor containing the IDs
+                     of the generated tokens (excluding SOS/EOS).
                      Shape: (sequence_length,)
         """
-        self.model.eval() # Set model to evaluation mode (disables dropout etc.)
-        generated_ids = []
-        log_probs_list = [] # Store log probs of chosen tokens
+        try:
+            self.model.eval() # Set model to evaluation mode (disables dropout etc.)
 
-        # Start sequence generation with SOS token
-        current_token_id = self.tokenizer.sos_token_id
-        # Input tensor needs batch dimension: (batch_size=1, seq_len=1)
-        input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
+            # Parse hint if provided
+            hinted_token_ids = self._parse_hint(hint)
+            hint_boost_factor = 1.5 # How much to increase probability mass for hinted tokens
 
-        # Initialize hidden state for the batch
-        hidden = self.model.init_hidden(batch_size=1, device=self.device)
+            generated_ids = []
+            log_probs_list = [] # Store log probs of chosen tokens
 
-        with torch.no_grad(): # Disable gradient calculation during generation
-            for _ in range(self.max_gen_length):
-                # Get output logits and updated hidden state from the model
-                # Output shape: (batch=1, seq=1, vocab_size)
-                logging.debug(f"Loop {_}: Input shape {input_tensor.shape}")
-                output_logits, hidden = self.model(input_tensor, hidden)
+            # Start sequence generation with SOS token
+            current_token_id = self.tokenizer.sos_token_id
+            # Input tensor needs batch dimension: (batch_size=1, seq_len=1)
+            input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
 
-                logging.debug(f"Loop {_}: Model output logits shape {output_logits.shape}")
-                # Get logits for the last token: shape (vocab_size)
-                # Squeeze removes batch and sequence dimensions (both are 1)
-                last_logits = output_logits.squeeze(0).squeeze(0)
+            # Initialize hidden state for the batch
+            hidden = self.model.init_hidden(batch_size=1, device=self.device)
 
-                # Apply softmax to get probabilities for sampling
-                probabilities = F.softmax(last_logits, dim=-1)
+            with torch.no_grad(): # Disable gradient calculation during generation
+                for _ in range(self.max_gen_length):
+                    # Get output logits and updated hidden state from the model
+                    # Output shape: (batch=1, seq=1, vocab_size)
+                    logging.debug(f"Loop {_}: Input shape {input_tensor.shape}")
+                    output_logits, hidden = self.model(input_tensor, hidden)
 
-                # Apply log_softmax to get log probabilities (numerically stable)
-                log_probabilities = F.log_softmax(last_logits, dim=-1)
+                    logging.debug(f"Loop {_}: Model output logits shape {output_logits.shape}")
+                    # Get logits for the last token: shape (vocab_size)
+                    # Squeeze removes batch and sequence dimensions (both are 1)
+                    last_logits = output_logits.squeeze(0).squeeze(0)
 
-                # Sample the next token ID based on the probabilities
-                next_token_id = torch.multinomial(probabilities, num_samples=1).item()
+                    # Apply softmax to get probabilities for sampling
+                    probabilities = F.softmax(last_logits, dim=-1)
+                    # --- Apply Hint Bias ---
+                    if hinted_token_ids:
+                        for token_id in hinted_token_ids:
+                            if 0 <= token_id < probabilities.shape[0]: # Check bounds
+                                probabilities[token_id] *= hint_boost_factor
+                        # Re-normalize probabilities after boosting
+                        # Add a small epsilon to prevent division by zero if all probabilities become zero
+                        probabilities = probabilities / (probabilities.sum() + 1e-9)
+                    # --- End Hint Bias ---
 
-                logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id}")
-                # --- Token Handling ---
-                # 1. Stop if EOS token is generated
-                if next_token_id == self.tokenizer.eos_token_id:
-                    break
+                    # Apply log_softmax to get log probabilities (numerically stable) - Use original logits for loss
+                    log_probabilities = F.log_softmax(last_logits, dim=-1)
 
-                # 2. Store generated ID (excluding SOS, implicitly excluding EOS by breaking)
-                generated_ids.append(next_token_id)
+                    # Sample the next token ID based on the probabilities
+                    next_token_id = torch.multinomial(probabilities, num_samples=1).item()
 
-                # 3. Store log probability of the *chosen* token for RL
-                log_probs_list.append(log_probabilities[next_token_id])
+                    logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id}")
+                    # --- Token Handling ---
+                    # 1. Stop if EOS token is generated
+                    if next_token_id == self.tokenizer.eos_token_id:
+                        break
 
-                # 4. Prepare input for the next iteration: the chosen token
-                current_token_id = next_token_id
-                input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
+                    # 2. Store generated ID (excluding SOS, implicitly excluding EOS by breaking)
+                    generated_ids.append(next_token_id)
 
-        # Decode the generated sequence of IDs back to a string
-        # Pass only the generated IDs (excluding SOS/EOS)
-        generated_tensor = torch.LongTensor(generated_ids)
-        generated_code = self.tokenizer.decode(generated_tensor) # decode handles filtering special tokens
+                    # 3. Store log probability of the *chosen* token for RL
+                    log_probs_list.append(log_probabilities[next_token_id])
 
-        # Stack the collected log probabilities into a single tensor for the learning step
-        log_probs_tensor = torch.stack(log_probs_list) if log_probs_list else torch.empty(0, device=self.device)
+                    # 4. Prepare input for the next iteration: the chosen token
+                    current_token_id = next_token_id
+                    input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
 
-        logging.debug(f"Returning from generate. Code type: {type(generated_code)}, Log probs type: {type(log_probs_tensor)}")
-        logging.debug(f"Generated code: '{generated_code}'")
-        logging.debug(f"Log probs shape: {log_probs_tensor.shape}")
+            # Decode the generated sequence of IDs back to a string (outside the loop)
+            generated_tensor = torch.LongTensor(generated_ids)
+            generated_code = self.tokenizer.decode(generated_tensor) # decode handles filtering special tokens
 
-    def learn(self, reward: float, log_probs: torch.Tensor):
+            # Convert generated IDs list to tensor
+            generated_ids_tensor = torch.LongTensor(generated_ids).to(self.device)
+    
+            logging.debug(f"Returning from generate. Code type: {type(generated_code)}, Generated IDs shape: {generated_ids_tensor.shape}")
+            logging.debug(f"Generated code: '{generated_code}'")
+    
+            return generated_code, generated_ids_tensor
+
+        except Exception as e:
+            import traceback
+            logging.error(f"!!! EXCEPTION INSIDE generate method: {type(e).__name__}: {e}")
+            logging.error(traceback.format_exc())
+            # Return None to indicate failure, handled by runner.py
+            return None, None
+
+    def learn(self, reward: float, generated_ids: torch.Tensor):
         """
         Updates the model weights using the REINFORCE algorithm based on the
-        reward received for a generated sequence.
+        reward received for a generated sequence. Recalculates log probabilities
+        with gradient tracking enabled.
 
         Args:
             reward (float): The scalar reward obtained for the generated sequence.
                             (In this simple case, the final score is used as the return).
-            log_probs (torch.Tensor): A tensor containing the log probabilities of the
-                                      actions (tokens) taken in the generated sequence.
-                                      Shape: (sequence_length,)
+            generated_ids (torch.Tensor): A tensor containing the IDs of the
+                                          actions (tokens) taken in the generated sequence.
+                                          Shape: (sequence_length,)
         """
-        if log_probs.numel() == 0:
-            logging.warning("Learn called with empty log_probs tensor. Skipping update.")
+        if generated_ids.numel() == 0:
+            logging.warning("Learn called with empty generated_ids tensor. Skipping update.")
             return # Cannot learn from an empty sequence
 
         self.model.train() # Set model to training mode
 
-        # REINFORCE loss: - (sum of log_probs * reward)
-        # We want to maximize reward, so we minimize the negative expectation.
-        # Using the final reward as the return G_t for all steps in this simple version.
-        # Ensure reward is on the same device as log_probs if it needs to be a tensor operation,
-        # but here it's a scalar multiplier.
-        loss = -torch.sum(log_probs) * reward
-        
-        # Ensure loss is on the correct device before backward pass
-        loss = loss.to(self.device)
+        # --- Recalculate log probabilities with gradient tracking ---
+        # Prepend SOS token for model input
+        sos_tensor = torch.LongTensor([[self.tokenizer.sos_token_id]]).to(self.device)
+        # Input sequence for forward pass: [SOS, token1, token2, ..., tokenN-1]
+        # Target sequence for loss:       [token1, token2, ..., tokenN] (which is generated_ids)
+        input_seq = torch.cat((sos_tensor, generated_ids.unsqueeze(0)[:, :-1]), dim=1)
+
+        # Perform forward pass to get logits with gradients
+        # We don't need the hidden state output here
+        logits, _ = self.model(input_seq) # Shape: (batch=1, seq_len, vocab_size)
+        logits = logits.squeeze(0) # Shape: (seq_len, vocab_size)
+
+        # Calculate log probabilities from logits
+        log_probabilities = F.log_softmax(logits, dim=-1)
+
+        # Select the log probabilities corresponding to the actual generated tokens
+        # generated_ids shape: (seq_len,)
+        # log_probabilities shape: (seq_len, vocab_size)
+        # We need log_prob_actions shape: (seq_len,)
+        log_prob_actions = log_probabilities[range(generated_ids.shape[0]), generated_ids]
+        # --- End Recalculation ---
+
+        # REINFORCE loss: - (sum of log_prob_actions * reward)
+        loss = -torch.sum(log_prob_actions) * reward
+        loss = loss.to(self.device) # Ensure loss is on the correct device
 
         logging.debug(f"Calculated loss: {loss.item()} for reward: {reward}")
 

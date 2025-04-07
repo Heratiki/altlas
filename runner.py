@@ -49,7 +49,7 @@ def get_hint_from_advisor(task, history):
         to consult (if multiple are available), and how much weight to give advisor suggestions.
         It should avoid over-reliance and prioritize its own learned strategies when possible.
     """
-    print("🤔 Agent seems stuck. Requesting a hint from advisor...")
+    # print("🤔 Agent seems stuck. Requesting a hint from advisor...")
     # Simulate getting a hint - replace with real logic
     # FUTURE INTENT: The simulation logic will be removed. Real API calls and error handling
     # for network issues or advisor unavailability will be implemented.
@@ -64,13 +64,15 @@ def get_hint_from_advisor(task, history):
     # Basic context for the advisor (can be expanded)
     # FUTURE INTENT: Replace this minimal context with the richer prompt described above.
     context = f"Task: {task.description}\nRecent Scores: {[h.get('score', 0) for h in history[-5:]]}"
-    print(f"Sent context to advisor:\n{context}")
+    # print(f"Sent context to advisor:\n{context}")
     
     hint = random.choice(possible_hints)
     if hint:
-        print(f"💡 Advisor Hint: {hint}")
+        # print(f"💡 Advisor Hint: {hint}")
+        pass # Add pass to make the if block valid
     else:
-        print("🤷 Advisor had no hint this time.")
+        # print("🤷 Advisor had no hint this time.")
+        pass # Add pass to make the else block valid
     return hint
 # --- End Advisor Placeholder ---
 
@@ -134,7 +136,7 @@ def main():
         while attempt_count < max_attempts and not success:
             attempt_count += 1
             attempts_since_last_check += 1
-            print(f"\n🔄 Attempt {attempt_count}/{max_attempts}")
+            # (Inline status print moved to end of loop iteration)
 
             # --- Stuck Detection & Hinting ---
             if attempts_since_last_check >= stuck_check_window:
@@ -148,8 +150,22 @@ def main():
             # --- End Stuck Detection ---
 
             # Generate code, potentially using a hint
-            code_attempt, log_probs = generator.generate(current_task, logger.get_history(), hint=current_hint) # Capture log_probs
-            print(f"📝 Generated code attempt ({len(code_attempt)} chars)")
+            # Generate code, potentially using a hint
+            try:
+                code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint) # Now returns generated_ids
+                # Check if generate somehow returned None despite not having a path for it
+                if code_attempt is None or generated_ids is None: # Check generated_ids
+                     print("!!! generator.generate returned None unexpectedly. Skipping attempt.")
+                     continue
+            except Exception as gen_e:
+                print(f"!!! EXCEPTION during generator.generate: {type(gen_e).__name__}: {gen_e}")
+                import traceback
+                traceback.print_exc()
+                # Decide how to handle - skip attempt
+                print("!!! Skipping attempt due to generation error.")
+                continue # Skip to next attempt
+
+            # print(f"📝 Generated code attempt ({len(code_attempt)} chars)") # Commented out for less verbose output
             
             # Check safety and novelty
             if not safety_checker.is_safe(code_attempt):
@@ -164,27 +180,38 @@ def main():
             
             # Execute code
             result = executor.execute(code_attempt)
-            print(f"🏃 Execution complete: {result.status}")
+            # print(f"🏃 Execution complete: {result.status}") # Commented out for less verbose output
             
             # Score result
+            
+            # (Status update moved below score calculation)
+            
+            # (Status update block moved below)
+            
+            # --- Update Inline Status ---
+            best_score_val, best_attempt_num = logger.get_best_score_info()
+            status_line = f"\r🔄 Attempt {attempt_count}/{max_attempts} | Score: {score:.2f} | Status: {result.status} | Best: {best_score_val:.2f} (Attempt {best_attempt_num})"
+            print(f"{status_line:<100}", end="", flush=True) # Pad to 100 chars
+            # --- End Inline Status ---
             score = scorer.score(result, current_task)
-            print(f"📊 Attempt score: {score:.2f}")
+            # print(f"📊 Attempt score: {score:.2f}") # Commented out for less verbose output
             
             # Log attempt (even if score is low, for learning)
             # Pass the actual result object now
-            logger.log_attempt(code_attempt, result, score, fingerprint) 
+            logger.log_attempt(attempt_count, code_attempt, result, score, fingerprint) # Pass attempt_count
             
             # --- Perform learning step --- 
-            generator.learn(score, log_probs)
+            generator.learn(score, generated_ids) # Pass generated_ids
             # --- End learning step ---
                 
             # Check for success using configured threshold
             if score >= success_threshold: # Use configured threshold
                 success = True
                 print(f"🎉 Success achieved on attempt {attempt_count}!")
+        print() # Add a newline after the loop finishes
                 
-            # Clear hint after one use to avoid over-reliance
-            current_hint = None 
+        # Clear hint after one use to avoid over-reliance (outside loop)
+        current_hint = None
     
     finally: 
         # --- Save Learned Weights ---

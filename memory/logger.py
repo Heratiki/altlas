@@ -19,12 +19,14 @@ class AttemptLogger:
         
         self.attempts = []
         self.best_score = 0.0
+        self.best_attempt_number = 0 # Track which attempt got the best score
         self.best_attempt = None
         
-    def log_attempt(self, code, result, score, fingerprint):
+    def log_attempt(self, attempt_number: int, code: str, result, score: float, fingerprint: str):
         """Log a code attempt with its result and score.
-        
+
         Args:
+            attempt_number (int): The current attempt number.
             code (str): The generated code.
             result (ExecutionResult): The execution result.
             score (float): The attempt's score.
@@ -44,6 +46,7 @@ class AttemptLogger:
         attempt = {
             'timestamp': time.time(),
             'code': code,
+            'attempt_number': attempt_number, # Store attempt number
             'fingerprint': fingerprint,
             # FUTURE INTENT: Store the full ExecutionResult object or its dict representation 
             # instead of manually copying fields, ensuring all execution details are captured.
@@ -62,6 +65,7 @@ class AttemptLogger:
         # Update best score
         if score > self.best_score:
             self.best_score = score
+            self.best_attempt_number = attempt_number # Update best attempt number
             self.best_attempt = attempt
             
             # Save the best attempt to disk
@@ -93,3 +97,7 @@ class AttemptLogger:
     def get_best_score(self):
         """Get the best score achieved so far."""
         return self.best_score
+
+    def get_best_score_info(self):
+        """Get the best score achieved so far and the attempt number."""
+        return self.best_score, self.best_attempt_number

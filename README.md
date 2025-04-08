@@ -6,6 +6,8 @@ AltLAS is an experimental system designed to explore emergent learning in AI age
 
 This system uses a PyTorch-based RNN (LSTM) model trained with the REINFORCE algorithm (with baseline and entropy regularization) to generate code attempts.
 
+Each task is defined in a JSON file that includes not only the expected output but also valid solution patterns and constraints. This allows the system to recognize multiple valid approaches to solving a problem while ensuring core requirements (like specific operators or values) are met.
+
 ## Setup
 
 This project is designed to run within a development container.
@@ -44,7 +46,24 @@ The main script to run the agent is `runner.py`.
 
 3.  **Available Tasks:**
     *   `hello_world`: A simple task requiring the agent to print "hello world". Found in `task/hello_world.json` (implicitly, needs to be created or loaded dynamically by TaskLoader improvements).
-    *   `benchmark_add_two_numbers`: A benchmark task requiring the agent to print the sum of 5 and 3 (output "8"). Found in `task/benchmarks/add_two_numbers.json`.
+    *   `benchmark_add_two_numbers`: A benchmark task demonstrating pattern-based task definition. It requires the agent to print the sum of 5 and 3 (output "8") while accepting multiple valid solution approaches like direct addition, variable-based addition, or function-based solutions. Found in `task/benchmarks/benchmark_add_two_numbers.json`.
+
+## Task Definition
+
+Tasks are defined in JSON files with the following structure:
+* `name`: Task identifier
+* `description`: Human-readable task description
+* `success_criteria`:
+  * `type`: Type of validation (e.g., "code_pattern", "exact_output")
+  * `expected_output`: Expected program output
+  * `valid_patterns`: Array of acceptable solution patterns and variations
+  * `case_sensitive`: Whether output matching is case-sensitive
+  * `whitespace_sensitive`: Whether whitespace matters in pattern matching
+* `constraints`: Optional requirements like:
+  * `required_operators`: Operators that must be used
+  * `required_numbers`: Numbers that must appear in the solution
+  * `max_tokens`: Maximum tokens allowed in solution
+* `difficulty`: Task difficulty level (e.g., "beginner", "intermediate")
 
 ## Understanding the Output
 

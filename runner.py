@@ -686,10 +686,10 @@ def main():
                     stats_table.add_row("Current Entropy Coef", f"{current_entropy_coef:.4f}")
                     stats_table.add_row("Highest Score", f"{best_score_val:.2f}")
                     stats_table.add_row("Best Attempt", str(best_attempt_num))
-                    # Add best attempt's output
+                    # Add best attempt's code instead of result
                     best_attempt_info = logger.get_attempt(best_attempt_num)
                     if best_attempt_info:
-                        stats_table.add_row("Best Output", str(best_attempt_info.get('result', 'N/A')))
+                        stats_table.add_row("Best Code", str(best_attempt_info.get('code', 'N/A')))
                     layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
                     status_panel = Text("\n".join(status_messages[:15]))
                     layout["status"].update(Panel(status_panel, title="Status Messages", border_style="yellow"))

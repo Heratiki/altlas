@@ -102,58 +102,72 @@ class AttemptScorer:
         return feedback_scores.get(feedback_type, 0.1)
     
     def _score_exact_output(self, result, task):
-        """Score based on exact output matching and code analysis for arithmetic tasks."""
-        expected = task.success_criteria['exact_output']
-        actual = result.stdout.strip()
-        
-        # Base scoring for output match
-        output_score = 0.0
-        if actual == expected:
-            output_score = 0.8  # Reduced from 1.0 to leave room for code structure scoring
+        """Score based on pattern matching and output validation."""
+        if task.success_criteria['type'] == 'code_pattern':
+            # Check output first
+            output_score = 0.0
+            if result.stdout.strip() == task.success_criteria['expected_output']:
+                output_score = 0.8  # Base score for correct output
             
-        # Additional scoring for benchmark_add_two_numbers task
-        if task.name == "benchmark_add_two_numbers":
-            try:
-                tree = ast.parse(result.code)
-                code_score = 0.0
-                
-                # Look for print(5+3) or variations
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'print':
-                        if len(node.args) == 1 and isinstance(node.args[0], ast.BinOp):
-                            if isinstance(node.args[0].op, ast.Add):
-                                left = node.args[0].left
-                                right = node.args[0].right
-                                if (isinstance(left, ast.Num) and isinstance(right, ast.Num)):
-                                    if (left.n == 5 and right.n == 3) or (left.n == 3 and right.n == 5):
-                                        code_score = 0.2  # Additional points for correct addition
-                                        break
-                
-                # Final score combines output correctness and code structure
-                return max(output_score + code_score, output_score)  # Don't exceed 1.0
-                
-            except Exception as e:
-                logging.warning(f"Error during code structure analysis: {e}")
-                return output_score  # Fall back to just output score
-                
-        # For non-benchmark tasks, use regular scoring
-        if actual == expected:
-            return 1.0
+            # Check code patterns
+            code_score = 0.0
+            code = result.code.strip()
             
-        # Partial matching as before
-        try:
-            # Handle potential empty strings
-            if not actual and not expected:
-                return 1.0
-            if not actual or not expected:
-                return 0.0
+            # Normalize whitespace if not sensitive
+            if not task.success_criteria.get('whitespace_sensitive', True):
+                code = ' '.join(code.split())
+            
+            # Check each pattern type
+            for pattern_group in task.success_criteria['valid_patterns']:
+                # Convert pattern to canonical form for comparison
+                if isinstance(pattern_group['pattern'], list):
+                    pattern = '\n'.join(pattern_group['pattern'])
+                else:
+                    pattern = pattern_group['pattern']
                 
-            similarity_ratio = difflib.SequenceMatcher(None, actual, expected).ratio()
-            partial_score = similarity_ratio * 0.9
-            return max(0.0, partial_score)
-        except Exception as e:
-            logging.warning(f"Error during SequenceMatcher scoring: {e}")
-            return 0.0
+                # Check main pattern
+                if self._matches_pattern(code, pattern):
+                    code_score = 0.2
+                    break
+                
+                # Check variations if they exist
+                if 'variations' in pattern_group:
+                    for variation in pattern_group['variations']:
+                        if isinstance(variation, list):
+                            variation = '\n'.join(variation)
+                        if self._matches_pattern(code, variation):
+                            code_score = 0.2
+                            break
+                    if code_score > 0:
+                        break
+            
+            # Check constraints if they exist
+            constraint_score = 0.0
+            if 'constraints' in task:
+                constraints_met = True
+                if 'required_operators' in task['constraints']:
+                    for op in task['constraints']['required_operators']:
+                        if op not in code:
+                            constraints_met = False
+                if 'required_numbers' in task['constraints']:
+                    for num in task['constraints']['required_numbers']:
+                        if str(num) not in code:
+                            constraints_met = False
+                if constraints_met:
+                    constraint_score = 0.1
+            
+            return min(1.0, output_score + code_score + constraint_score)
+            
+        else:  # Fall back to simple output matching
+            expected = task.success_criteria['exact_output']
+            actual = result.stdout.strip()
+            return 1.0 if actual == expected else 0.0
+            
+    def _matches_pattern(self, code: str, pattern: str) -> bool:
+        """Check if code matches a pattern, handling whitespace normalization."""
+        code = ' '.join(code.split())
+        pattern = ' '.join(pattern.split())
+        return code == pattern
             
     def get_tool_feedback(self, code_attempt: str, result) -> ToolFeedback:
         """

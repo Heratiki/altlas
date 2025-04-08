@@ -2,9 +2,59 @@
     "name": "benchmark_add_two_numbers",
     "description": "Benchmark task: Generate code that prints the sum of 5 and 3.",
     "success_criteria": {
-        "type": "exact_output",
-        "exact_output": "8",
-        "case_sensitive": true
+        "type": "code_pattern",
+        "expected_output": "8",
+        "valid_patterns": [
+            {
+                "type": "direct_addition",
+                "pattern": "print(5+3)",
+                "variations": [
+                    "print(3+5)",
+                    "print(5 + 3)",
+                    "print(3 + 5)"
+                ]
+            },
+            {
+                "type": "variable_addition",
+                "pattern": [
+                    "x=5",
+                    "y=3",
+                    "print(x+y)"
+                ],
+                "variations": [
+                    [
+                        "a=5",
+                        "b=3",
+                        "print(a+b)"
+                    ],
+                    [
+                        "num1=5",
+                        "num2=3",
+                        "print(num1+num2)"
+                    ]
+                ]
+            },
+            {
+                "type": "sum_function",
+                "pattern": [
+                    "def sum(a,b):",
+                    "    return a+b",
+                    "print(sum(5,3))"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
     },
-    "max_tokens": 20
+    "constraints": {
+        "required_operators": [
+            "+"
+        ],
+        "required_numbers": [
+            5,
+            3
+        ],
+        "max_tokens": 20
+    },
+    "difficulty": "beginner"
 }

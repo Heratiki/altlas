@@ -906,3 +906,17 @@ class CodeGenerator:
         # Convert to list
         template_token_ids = list(template_tokens)
         return template_token_ids, template_boost_factor
+
+
+    def get_state(self):
+        """Returns a dictionary containing the current state of the generator for reporting."""
+        return {
+            'current_learning_rate': self.current_lr,
+            'max_entropy_coefficient': self.max_entropy_coefficient,
+            'min_entropy_coefficient': self.min_entropy_coefficient,
+            'baseline': self.baseline,
+            'no_improvement_count': self.no_improvement_count,
+            'best_reward': self.best_reward,
+            'token_frequency': self.token_frequency.copy(), # Return a copy
+            'experience_buffer_size': len(self.experience_buffer)
+        }

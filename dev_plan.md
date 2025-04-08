@@ -4,6 +4,16 @@
 
 This document outlines the development plan for improving the AltLAS reinforcement learning code generation system. The plan addresses several key issues identified during initial testing while maintaining the core philosophy of allowing the agent to develop its own approach to coding through emergent learning.
 
+**IMPORTANT: Stability-First Development Principle**
+All improvements and modifications in this plan should strictly adhere to this principle:
+- New implementations must not break any existing working infrastructure
+- Changes should be applied incrementally with thorough testing between steps
+- Backward compatibility must be maintained for all critical components
+- Refactoring should preserve behavior and interfaces of existing systems
+- Each change should be isolated and reversible if unexpected issues arise
+
+This conservative approach ensures that the evolution of AltLAS builds on our working foundation rather than risking destabilization of functioning components. All developers should verify that their changes integrate seamlessly with the existing codebase before merging.
+
 ## Current Issues
 
 ✓ FIXED
@@ -102,7 +112,7 @@ Each task below should be completed while preserving existing functionality. Tas
 - [✓] **4.2 Improve Tokenizer in `tokenizer.py`**
   - [✓] Enhance encoding/decoding functionality (greedy matching, newline handling)
   - [✓] Add better handling for unknown tokens (basic UNK mapping)
-  - [ ] Implement normalization of code before tokenization
+  - [✓] Implement normalization of code before tokenization
   - [ ] Add handling for INDENT/DEDENT tokens
 
 - [✓] **4.3 Add Token Usage Analytics**
@@ -117,7 +127,7 @@ Each task below should be completed while preserving existing functionality. Tas
 - [✓] **5.1 Enhance Fingerprinting in `memory/fingerprints.py`**
   - [✓] Improve hash function to better capture code semantics (via improved normalization)
   - [✓] Implement normalized code representation before fingerprinting (preserve case, normalize whitespace)
-  - [ ] Add syntax-aware pattern detection
+  - [✓] Add syntax-aware pattern detection
 
 - [✓] **5.2 Improve Duplicate Handling in `runner.py`**
   - [ ] Add penalty for repeatedly generating similar but ineffective patterns
@@ -171,10 +181,17 @@ Each task below should be completed while preserving existing functionality. Tas
 
 **Goal**: Improve user control over runs and ensure stability.
 
-- [ ] **8.1 Implement Graceful Exit (Ctrl+C)**
+- [✓] **8.1 Implement Graceful Exit (Ctrl+C)**
   - [✓] Add `try...except KeyboardInterrupt` around main loop in `runner.py`.
   - [✓] Implement logic to save state on clean exit (success, max attempts, Ctrl+C) but not on error.
   - [✓] Update final summary message for user interruption.
+
+- [✓] **8.2 Implement Run Continuity**
+  - [✓] Create state persistence mechanism to save and load run state (attempt_count, task, success status).
+  - [✓] Modify main loop to continue running until MaxAttempts even after finding a successful solution.
+  - [✓] Add resumption capability to continue where execution left off after manual interruption.
+  - [✓] Enhance existing process checking to function as a lock file mechanism.
+  - [✓] Add UI notifications for resumption and continuation scenarios.
 
 ### 9. Task Configuration and Scaling [NEW]
 
@@ -273,6 +290,59 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Use beam search when traditional generation is struggling
   - [✓] Apply grammar rules and hints within beam search
 
+### 13. Training Report System [NEW]
+
+**Goal**: Implement periodic reporting to track training progress and identify improvement opportunities
+
+- [✓] **13.1 Create Training Report Template**
+  - [✓] Design comprehensive Markdown template with key metrics
+  - [✓] Include sections for run metadata, performance metrics, pattern analysis
+  - [✓] Add learning status indicators (plateaus, semantic drift)
+  - [✓] Create historical comparison section for tracking progress
+
+- [✓] **13.2 Implement Report Generator**
+  - [✓] Create a `report_generator.py` module in the `memory` directory
+  - [✓] Implement data collection from logs and training state (basic state passing)
+  - [✓] Calculate performance metrics (basic averages, trends, best/worst)
+  - [🔄] Analyze patterns in successful vs. failed attempts (basic error counts implemented)
+  - [🔄] Generate insights and recommendations automatically (basic implementation added)
+
+- [✓] **13.3 Integrate with Training Loop**
+  - [✓] Add report generation trigger in `runner.py` (attempt-based)
+  - [✓] Implement periodic report saving (timestamped and latest)
+  - [✓] Create option to generate report on task completion (`ReportOnSuccess` flag)
+  - [✓] Add configuration parameters for reporting frequency (`ReportFrequency`)
+
+- [🔄] **13.4 Implement Pattern Analysis**
+  - [🔄] Create code pattern detection system (basic keyword counting added)
+  - [✓] Track common error types and frequencies (basic implementation added)
+  - [✓] Implement semantic drift detection (basic output similarity check)
+  - [✓] Add token distribution analysis (basic top-N tokens added)
+
+### 14. Vocabulary System Enhancements [PLANNED]
+
+**Goal**: Evolve AltLAS’s vocabulary into a more abstract, language-agnostic system that supports future tasks and multi-language compatibility.
+
+- [ ] **14.1 Implement Abstract Token Roles**
+  - [ ] Replace language-specific tokens (e.g., `print`, `def`) with role-based placeholders such as `FUNC_CALL`, `OUTPUT_OP`, `LOOP_KEYWORD`.
+  - [ ] Facilitate generalization across multiple programming languages through abstraction.
+
+- [ ] **14.2 Introduce Structured Identifier Tokens**
+  - [ ] Add generic tokens like `VAR_GENERIC`, `FUNC_GENERIC`, `BLOCK_START`, `BLOCK_END` to better capture program structure.
+  - [ ] Enable the model to learn structural patterns independent of specific syntax.
+
+- [ ] **14.3 Develop Dynamic Token Usage Tracking**
+  - [ ] Track token frequency across successful and failed attempts during training.
+  - [ ] Use this data to inform future vocabulary pruning or boosting strategies.
+
+- [ ] **14.4 Build Vocabulary Expansion Tool**
+  - [ ] Create a `vocab_updater.py` script to analyze generated code.
+  - [ ] Detect out-of-vocabulary tokens that appear frequently and propose additions to the vocabulary.
+
+- [ ] **14.5 Correlate Tokens with Fingerprints**
+  - [ ] Enhance fingerprint logging to include token pattern information.
+  - [ ] Use token-fingerprint correlations to cluster outcome patterns and adjust generation strategies accordingly.
+
 ## Priority Order
 
 **Current Priorities:**
@@ -302,6 +372,11 @@ Each task below should be completed while preserving existing functionality. Tas
    - Improve task and hint integration
    - Add error message understanding
 
+7. **Seventh Priority: Training Report Implementation (13.1, 13.2, 13.3)**
+   - Implement training report generation for better tracking and analysis
+   - Integrate reporting into the training loop
+   - Add automatic pattern analysis and insights
+
 ## Tracking Progress
 
 As tasks are completed, update their status in this document:
@@ -318,6 +393,9 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-08 (2):** Implemented pattern-based task definitions to better handle multiple valid solution approaches. Updated scorer.py to recognize different solution patterns and implemented constraint checking. This change makes tasks self-contained and more flexible for future complexity scaling.
 *   **2025-04-08 (3):** Implemented significant improvements to help the model break through the 0.50 score threshold: Added temperature-controlled sampling, Python grammar rules, template-guided generation, weight reset mechanism for bad local minima, and beam search generation. Initial testing shows these changes allow the model to generate syntactically valid Python code and solve the add_two_numbers benchmark more consistently.
 *   **2025-04-08 (4):** Completely refactored the `AttemptScorer` class with an adaptive, task-agnostic reward shaping system. The new implementation features multiple specialized evaluation components (syntax, execution, output matching, structural patterns, constraints, and semantic similarity) with dynamic weighting. This creates a smoother learning gradient that scales with task complexity while avoiding hardcoded benchmark-specific logic. Early testing shows improved rewards for partial solutions and better differentiation between various code quality levels.
+*   **2025-04-08 (5):** Created a comprehensive training report template (`training_report.md`) that captures key metrics from training cycles. The template includes sections for run metadata, performance metrics, pattern analysis, learning status indicators, resource utilization, and historical comparisons. This will provide better visibility into the learning process and facilitate more informed adjustments to the system. Next steps involve implementing the report generator and integrating it with the training loop.
+*   **2025-04-08 (6):** Implemented the core `TrainingReportGenerator` and integrated it with `runner.py`. Reports are now generated periodically based on `config.ini`. Added basic token distribution analysis and keyword-based pattern counting to the report. Fixed several bugs related to template path resolution and import errors. Implemented report rotation to keep the latest 5 reports.
+*   **2025-04-08 (7):** Completed remaining core features for Task 13: Added option (`ReportOnSuccess`) to generate a final report on task success, implemented basic semantic drift detection based on output similarity, and added automatic generation of simple insights (plateau detection, syntax error frequency) and recommendations to the report.
 
 ---
 

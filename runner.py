@@ -6,6 +6,7 @@ AltLAS Runner - Main orchestrator loop for the AltLAS system.
 import os
 import sys
 import time
+import json
 from pathlib import Path
 import random # Added for hint simulation
 import configparser # Added
@@ -45,6 +46,7 @@ try:
     from reinforcer.scorer import AttemptScorer
     from memory.logger import AttemptLogger
     from memory.fingerprints import AttemptFingerprinter
+    from memory.report_generator import TrainingReportGenerator
     from task.task_loader import TaskLoader
     from utils import get_pytorch_device # <-- Add import
 except ImportError as e:
@@ -91,6 +93,87 @@ log.addHandler(console_handler)
 import json
 import requests
 from typing import List, Dict, Any, Optional
+
+# State persistence functions
+def save_run_state(attempt_count, task_name, success, best_score=None, best_attempt=None):
+    """
+    Save the current run state to a file to allow resuming after interruption.
+    
+    Args:
+        attempt_count: Current attempt count
+        task_name: Name of the current task
+        success: Whether a successful solution has been found
+        best_score: Current best score (optional)
+        best_attempt: Attempt number of the best solution (optional)
+    """
+    try:
+        state_file = Path(__file__).parent / "memory" / "state.json"
+        state = {
+            "attempt_count": attempt_count,
+            "task_name": task_name,
+            "success": success,
+            "best_score": best_score,
+            "best_attempt": best_attempt,
+            "timestamp": time.time(),
+            "updated": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        with open(state_file, 'w') as f:
+            json.dump(state, f, indent=2)
+        
+        log.debug(f"Run state saved: attempt_count={attempt_count}, task={task_name}, success={success}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to save run state: {e}", exc_info=True)
+        return False
+
+def load_run_state(task_name=None):
+    """
+    Load the previous run state from file.
+    
+    Args:
+        task_name: If provided, only load state if it matches this task name
+        
+    Returns:
+        dict: The loaded state or None if no state exists or on error
+    """
+    try:
+        state_file = Path(__file__).parent / "memory" / "state.json"
+        if not state_file.exists():
+            log.debug("No previous run state found.")
+            return None
+            
+        with open(state_file, 'r') as f:
+            state = json.load(f)
+        
+        # Validate state has required fields
+        required_fields = ["attempt_count", "task_name", "success"]
+        if not all(field in state for field in required_fields):
+            log.warning("Previous run state file is invalid (missing required fields).")
+            return None
+            
+        # Check if task name matches if specified
+        if task_name and state["task_name"] != task_name:
+            log.info(f"Previous run was for a different task ('{state['task_name']}'), starting fresh.")
+            return None
+            
+        log.info(f"Loaded previous run state: attempt_count={state['attempt_count']}, task={state['task_name']}, success={state['success']}")
+        return state
+    except Exception as e:
+        log.error(f"Error loading run state: {e}", exc_info=True)
+        return None
+
+def clear_run_state():
+    """Delete the run state file"""
+    try:
+        state_file = Path(__file__).parent / "memory" / "state.json"
+        if state_file.exists():
+            state_file.unlink()
+            log.info("Run state file cleared.")
+        return True
+    except Exception as e:
+        log.error(f"Error clearing run state: {e}", exc_info=True)
+        return False
 
 def get_hint_from_advisor(task, history, max_history_entries=5):
     """
@@ -481,9 +564,12 @@ def main():
         stuck_check_window = runner_config.getint('StuckCheckWindow', 15)
         stuck_threshold = runner_config.getfloat('StuckThreshold', 0.01)
         hint_probability_on_stuck = runner_config.getfloat('HintProbabilityOnStuck', 1.0)
-        max_consecutive_stuck_checks = runner_config.getint('MaxConsecutiveStuckChecks', 3) 
-        log_frequency = runner_config.getint('LogFrequency', 500) 
-        top_tokens_to_log = runner_config.getint('TopTokensToLog', 10) 
+        max_consecutive_stuck_checks = runner_config.getint('MaxConsecutiveStuckChecks', 3)
+        log_frequency = runner_config.getint('LogFrequency', 500)
+        top_tokens_to_log = runner_config.getint('TopTokensToLog', 10)
+        report_frequency = runner_config.getint('ReportFrequency', 1000)
+        report_on_success = runner_config.getboolean('ReportOnSuccess', True) # Read new config
+        report_frequency = runner_config.getint('ReportFrequency', 1000)
 
         scorer_config = config['Scorer']
         success_threshold = scorer_config.getfloat('SuccessThreshold', 0.99)
@@ -518,6 +604,7 @@ def main():
     scorer = AttemptScorer(config_path=str(config_path))
     logger = AttemptLogger() # Assuming no config needed yet
     fingerprinter = AttemptFingerprinter() # Uses its own file path logic
+    report_generator = TrainingReportGenerator()
     # Reset attempt count and clear previous log file
     log_file_path = Path("memory/logs/best_attempt.json")
     if log_file_path.exists():
@@ -574,15 +661,65 @@ def main():
     run_exception = None     # Store any unexpected exception
     
     try:
+        # Check if we should load state from a previous run
+        previous_state = load_run_state(task_name=current_task.name)
+        if previous_state and not reset_training:
+            attempt_count = previous_state["attempt_count"]
+            success = previous_state["success"]
+            log.info(f"🔄 Resuming from previous run: attempt_count={attempt_count}, success={success}")
+            # Update UI with loaded state
+            status_messages.insert(0, f"🔄 [{time.strftime('%H:%M:%S')}] Resuming from previous run (attempt {attempt_count})")
+            
+            # If already successful but continuing for more attempts
+            if success:
+                status_messages.insert(0, f"🎉 [{time.strftime('%H:%M:%S')}] Already found successful solution, continuing for remaining attempts")
+        else:
+            log.info("Starting fresh run (no previous state or reset requested)")
+        
         # Use the UI console object for Live display with reduced refresh rate
         with Live(layout, refresh_per_second=4, console=ui_console, transient=True) as live:
-            # 3. Main learning loop
-            while attempt_count < max_attempts and not success:
+            # 3. Main learning loop - Continue until max attempts or interrupted
+            while attempt_count < max_attempts:
                 try:
                     # --- Inner Try Block for Attempt Logic --- 
                     attempt_count += 1
                     attempts_since_last_check += 1
+
+                    # --- Periodic Training Report Generation ---
+                    # Log values just before the check
+                    log.debug(f"Checking report trigger: attempt={attempt_count}, freq={report_frequency}, condition={(report_frequency > 0 and attempt_count % report_frequency == 0)}")
                     
+                    if report_frequency > 0 and attempt_count % report_frequency == 0:
+                        log.info(f"Attempt {attempt_count}: Triggering training report generation.")
+                        try:
+                            # Gather necessary state for the report
+                            gen_state = generator.get_state()
+                            scr_state = scorer.get_state()
+                            # History is stored in the logger instance's 'attempts' list
+                            attempt_history = logger.attempts # Note: This gets the *entire* history
+
+                            log.debug(f"Calling generate_and_save_report with history length: {len(attempt_history)}")
+                            report_path = report_generator.generate_and_save_report(
+                                attempt_count=attempt_count,
+                                max_attempts=max_attempts,
+                                current_task=current_task,
+                                history=attempt_history, # Pass the collected history
+                                generator_state=gen_state,
+                                scorer_state=scr_state,
+                                start_time=start_time,
+                                hints_provided=hints_provided,
+                                success_count=success_count
+                            )
+                            if report_path:
+                                log.info(f"📊 Training report generation successful. Report saved to {report_path}")
+                            else:
+                                # The generate method logs errors internally now, but add a runner-level warning
+                                log.warning(f"⚠️ Training report generation process indicated failure for attempt {attempt_count}.")
+                        except Exception as e:
+                            # Ensure any unexpected error in the runner's try block is logged with traceback
+                            log.error(f"⚠️ UNEXPECTED Error during training report generation trigger for attempt {attempt_count}: {e}", exc_info=True)
+                    # --- End Report Generation ---
+
                     # Update timing statistics
                     current_time = time.time()
                     attempt_times.append(current_time)
@@ -800,11 +937,21 @@ def main():
                     
                     # ... (Check for Success) ...
                     if score >= success_threshold:
-                        success = True
-                        # ... (update UI for success) ...
-                        live.update(layout)
-                        time.sleep(1)
-                        break # Exit the while loop on success
+                        if not success:
+                            # First time we've hit success - notify but don't break
+                            success = True
+                            status_messages.insert(0, f"🎉 [{time.strftime('%H:%M:%S')}] Success! Continuing to run until max attempts...")
+                            log.info(f"🎉 SUCCESS! Task solved on attempt {attempt_count}. Will continue until max attempts.")
+                    
+                    # Save run state after each attempt to enable resuming
+                    best_score_val, best_attempt_num = logger.get_best_score_info()
+                    save_run_state(
+                        attempt_count=attempt_count,
+                        task_name=current_task.name,
+                        success=success,
+                        best_score=best_score_val,
+                        best_attempt=best_attempt_num
+                    )
                     # --- End Inner Try Block ---
                 
                 except Exception as inner_e:
@@ -814,7 +961,6 @@ def main():
                     continue 
 
             # --- End Main Loop ---
-            
     except KeyboardInterrupt:
         log.warning("🏃 User interrupted the run (Ctrl+C).")
         user_interrupted = True
@@ -841,6 +987,36 @@ def main():
              # Should not happen if logic is correct, but log just in case
              log.warning("Unknown run termination state. Model state will NOT be saved.")
         # --- End Save Weights ---
+
+        # --- Generate Final Report on Success ---
+        # Task 13.3.3: Add option to generate report on task completion
+        if success and report_on_success:
+           log.info("Task completed successfully. Generating final report...")
+           try:
+               # Gather necessary state for the report
+               gen_state = generator.get_state()
+               scr_state = scorer.get_state()
+               attempt_history = logger.attempts
+
+               log.debug(f"Calling generate_and_save_report (on success) with history length: {len(attempt_history)}")
+               report_path = report_generator.generate_and_save_report(
+                   attempt_count=attempt_count,
+                   max_attempts=max_attempts,
+                   current_task=current_task,
+                   history=attempt_history,
+                   generator_state=gen_state,
+                   scorer_state=scr_state,
+                   start_time=start_time,
+                   hints_provided=hints_provided,
+                   success_count=success_count
+               )
+               if report_path:
+                   log.info(f"📊 Final training report saved to {report_path}")
+               else:
+                   log.warning(f"⚠️ Final training report generation process indicated failure.")
+           except Exception as final_report_e:
+               log.error(f"⚠️ Error during final report generation: {final_report_e}", exc_info=True)
+        # --- End Final Report Generation ---
 
         # --- Log Final Token Frequencies --- 
         if hasattr(generator, 'token_frequency') and generator.token_frequency:

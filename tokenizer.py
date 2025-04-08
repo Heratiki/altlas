@@ -83,6 +83,9 @@ class Tokenizer:
         Returns:
             torch.Tensor: A LongTensor containing the sequence of token IDs.
         """
+        # --- Normalization step ---
+        text = self._normalize_code(text)
+
         encoded_ids = [self.sos_token_id]
         remaining_text = text
         current_pos = 0
@@ -117,6 +120,19 @@ class Tokenizer:
 
         encoded_ids.append(self.eos_token_id)
         return torch.LongTensor(encoded_ids)
+
+    def _normalize_code(self, code: str) -> str:
+        """Basic normalization: strip trailing spaces, unify line endings, remove trailing blank lines."""
+        # Replace Windows/Mac line endings with Unix
+        code = code.replace('\r\n', '\n').replace('\r', '\n')
+        # Strip trailing spaces on each line
+        lines = [line.rstrip() for line in code.split('\n')]
+        # Remove trailing blank lines
+        while lines and lines[-1] == '':
+            lines.pop()
+        # Optionally, collapse multiple blank lines (not done here)
+        normalized = '\n'.join(lines)
+        return normalized
 
     def decode(self, tensor: torch.Tensor) -> str:
         """

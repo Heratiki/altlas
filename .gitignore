@@ -80,6 +80,7 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+/memory/reports/
 
 # Log Files
 *.log

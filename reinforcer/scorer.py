@@ -390,3 +390,18 @@ class AttemptScorer:
             ToolFeedback: Analysis of the execution result
         """
         return ToolFeedback(code_attempt, result.__dict__ if hasattr(result, '__dict__') else result)
+
+    def get_state(self):
+        """Returns a dictionary containing the current state of the scorer for reporting."""
+        # Return the base weights used for scoring components
+        base_weights = {
+            'syntax': 0.1,
+            'execution': 0.2, 
+            'output': 0.35,
+            'structural': 0.15,
+            'constraints': 0.1,
+            'semantic': 0.1
+        }
+        return {
+            'component_weights': base_weights
+        }

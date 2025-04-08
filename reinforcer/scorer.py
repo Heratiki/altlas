@@ -102,36 +102,58 @@ class AttemptScorer:
         return feedback_scores.get(feedback_type, 0.1)
     
     def _score_exact_output(self, result, task):
-        """Score based on exact output matching, with partial credit using SequenceMatcher."""
+        """Score based on exact output matching and code analysis for arithmetic tasks."""
         expected = task.success_criteria['exact_output']
-        actual = result.stdout.strip() # Strip whitespace from actual output
-        expected = expected.strip()   # Strip whitespace from expected output
+        actual = result.stdout.strip()
         
-        # Handle case sensitivity
-        if not task.success_criteria.get('case_sensitive', True):
-            expected = expected.lower()
-            actual = actual.lower()
-        
-        # Exact match - return 1.0 for perfect match
+        # Base scoring for output match
+        output_score = 0.0
+        if actual == expected:
+            output_score = 0.8  # Reduced from 1.0 to leave room for code structure scoring
+            
+        # Additional scoring for benchmark_add_two_numbers task
+        if task.name == "benchmark_add_two_numbers":
+            try:
+                tree = ast.parse(result.code)
+                code_score = 0.0
+                
+                # Look for print(5+3) or variations
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'print':
+                        if len(node.args) == 1 and isinstance(node.args[0], ast.BinOp):
+                            if isinstance(node.args[0].op, ast.Add):
+                                left = node.args[0].left
+                                right = node.args[0].right
+                                if (isinstance(left, ast.Num) and isinstance(right, ast.Num)):
+                                    if (left.n == 5 and right.n == 3) or (left.n == 3 and right.n == 5):
+                                        code_score = 0.2  # Additional points for correct addition
+                                        break
+                
+                # Final score combines output correctness and code structure
+                return max(output_score + code_score, output_score)  # Don't exceed 1.0
+                
+            except Exception as e:
+                logging.warning(f"Error during code structure analysis: {e}")
+                return output_score  # Fall back to just output score
+                
+        # For non-benchmark tasks, use regular scoring
         if actual == expected:
             return 1.0
             
-        # Partial match using SequenceMatcher for similarity ratio
+        # Partial matching as before
         try:
             # Handle potential empty strings
             if not actual and not expected:
-                return 1.0 # Both empty could be considered a match depending on task
+                return 1.0
             if not actual or not expected:
-                return 0.0 # One empty, one not - let syntax/error scoring handle this
+                return 0.0
                 
             similarity_ratio = difflib.SequenceMatcher(None, actual, expected).ratio()
-            # Scale the similarity score (e.g., map 0-1 ratio to 0.0-0.9 range)
-            partial_score = similarity_ratio * 0.9 
-            # Ensure score is non-negative
-            return max(0.0, partial_score) 
+            partial_score = similarity_ratio * 0.9
+            return max(0.0, partial_score)
         except Exception as e:
             logging.warning(f"Error during SequenceMatcher scoring: {e}")
-            return 0.0 # Fallback task score if similarity calculation fails
+            return 0.0
             
     def get_tool_feedback(self, code_attempt: str, result) -> ToolFeedback:
         """

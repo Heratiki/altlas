@@ -18,6 +18,7 @@ class ExecutionResult:
     stderr: str
     runtime: float
     exit_code: int
+    code: str = ""  # Store the code that was executed
     exception: str = None
 
 class CodeExecutor:
@@ -95,5 +96,6 @@ class CodeExecutor:
             stdout=stdout.strip(),
             stderr=stderr.strip(),
             runtime=runtime,
-            exit_code=exit_code
+            exit_code=exit_code,
+            code=code  # Include the original code
         )

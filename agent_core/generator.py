@@ -72,10 +72,12 @@ class CodeGenerator:
 
             # Optimizer Hyperparameters
             self.learning_rate = optimizer_config.getfloat('LearningRate', 0.001)
-            # Increase default entropy coefficient from 0.01 to 0.1 for better exploration
-            self.entropy_coefficient = optimizer_config.getfloat('EntropyCoefficient', 0.1) # Increased default
-            self.gradient_clip_norm = optimizer_config.getfloat('GradientClipNorm', 1.0)    # Read new param
-            self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1) # Read new param
+            # Read initial/max entropy coefficient
+            self.max_entropy_coefficient = optimizer_config.getfloat('EntropyCoefficient', 0.1) 
+            # Read minimum entropy coefficient for annealing
+            self.min_entropy_coefficient = optimizer_config.getfloat('MinEntropyCoefficient', 0.001)
+            self.gradient_clip_norm = optimizer_config.getfloat('GradientClipNorm', 1.0)    
+            self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1) 
 
             # Paths
             # Paths should be relative to project root defined in config
@@ -258,9 +260,18 @@ class CodeGenerator:
         """
         Generates a code attempt using the RNN model by sampling token by token.
         Also tracks token generation frequency.
+
+        Args:
+            task (Task, optional): The current task being attempted, may include max_tokens
+            history (list, optional): List of previous attempts
+            hint (str, optional): Optional hint to guide generation
         """
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
+
+            # Determine max generation length from task or config
+            max_gen_length = task.max_tokens if (task and task.max_tokens is not None) else self.max_gen_length
+            logging.debug(f"Using max_gen_length={max_gen_length} {'(from task)' if task and task.max_tokens else '(from config)'}")
 
             # Parse hint if provided
             hinted_token_ids = self._parse_hint(hint)
@@ -278,7 +289,7 @@ class CodeGenerator:
             hidden = self.model.init_hidden(batch_size=1, device=self.device)
 
             with torch.no_grad(): # Disable gradient calculation during generation
-                for _ in range(self.max_gen_length):
+                for _ in range(max_gen_length):
                     # Get output logits and updated hidden state from the model
                     # Output shape: (batch=1, seq=1, vocab_size)
                     logging.debug(f"Loop {_}: Input shape {input_tensor.shape}")
@@ -347,10 +358,16 @@ class CodeGenerator:
             # Return None to indicate failure, handled by runner.py
             return None, None
 
-    def learn(self, reward: float, generated_ids: torch.Tensor):
+    def learn(self, reward: float, generated_ids: torch.Tensor, current_entropy_coef: float, tool_feedback=None):
         """
-        Updates the model weights using REINFORCE with baseline, entropy regularization,
-        and gradient clipping.
+        Updates the model weights using REINFORCE with baseline, entropy regularization
+        (with dynamic coefficient), and gradient clipping. Now uses structured tool feedback.
+
+        Args:
+            reward (float): The reward received for the generated sequence.
+            generated_ids (torch.Tensor): The tensor of token IDs for the generated sequence.
+            current_entropy_coef (float): The dynamically calculated entropy coefficient for this step.
+            tool_feedback (ToolFeedback, optional): Structured feedback from tool execution.
         """
         if generated_ids.numel() == 0:
             logging.warning("Learn called with empty generated_ids tensor. Skipping update.")
@@ -397,23 +414,59 @@ class CodeGenerator:
         self.baseline = self.baseline_ema_alpha * float(reward) + (1 - self.baseline_ema_alpha) * self.baseline
         logging.debug(f"  Reward: {reward:.4f}, Baseline: {self.baseline:.4f}, Advantage: {advantage:.4f}")
 
-        # Removed advantage normalization for now
-        # normalized_advantage = advantage / generated_ids.shape[0] 
-        # --- End Advantage Calculation ---
+        # --- Calculate Token-wise Advantage Adjustments using Tool Feedback ---
+        token_wise_advantage = advantage
+        token_adjustments = None
+        
+        if tool_feedback is not None:
+            # Get decoded tokens from the generated sequence
+            generated_tokens = []
+            for token_id in generated_ids:
+                token_text = self.tokenizer.id_to_token.get(token_id.item(), "<UNK>")
+                generated_tokens.append(token_text)
+                
+            # Apply token-specific adjustments based on tool feedback
+            if hasattr(tool_feedback, 'get_penalty_factors') and callable(tool_feedback.get_penalty_factors):
+                token_penalties = tool_feedback.get_penalty_factors()
+                
+                # If we have penalty information
+                if token_penalties:
+                    token_adjustments = [1.0] * len(generated_tokens)  # Default to no adjustment
+                    
+                    # Identify tokens that match or are parts of penalized phrases
+                    for i, token in enumerate(generated_tokens):
+                        for penalized_phrase, penalty_factor in token_penalties.items():
+                            if token in penalized_phrase or penalized_phrase in token:
+                                # Reduce advantage for this token by the penalty factor
+                                token_adjustments[i] = max(0.1, 1.0 - penalty_factor)  # Ensure it's not zero or negative
+                                logging.debug(f"  Token '{token}' adjusted by factor {token_adjustments[i]:.2f} (matched penalized phrase '{penalized_phrase}')")
+                    
+                    # Log penalty information
+                    logging.debug(f"  Applied token-specific penalties from tool feedback: {tool_feedback.feedback_type}")
+        
+        # --- End Token-wise Advantage Adjustments ---
 
         # --- Calculate Loss ---
         # 1. Policy Gradient Loss (REINFORCE with baseline)
         # CORRECTED IMPLEMENTATION: Scale the sum of log probabilities by the advantage
-        policy_loss = -torch.sum(log_prob_actions) * advantage
-
+        if token_adjustments:
+            # Apply token-specific advantage adjustments
+            adjusted_advantages = [advantage * adj for adj in token_adjustments]
+            # Convert the list comprehension to a tensor before applying torch.sum()
+            policy_loss = torch.sum(torch.stack([-log_prob * adv for log_prob, adv in zip(log_prob_actions, adjusted_advantages)]))
+            logging.debug(f"  Using token-wise advantage adjustments from tool feedback")
+        else:
+            # Standard REINFORCE: Scale the entire sequence by the advantage
+            policy_loss = -torch.sum(log_prob_actions) * advantage
+        
         # 2. Entropy Bonus Calculation
         # ... existing code ...
         entropy = -torch.sum(probabilities * torch.log(probabilities + 1e-9), dim=-1)
         entropy_bonus = -torch.sum(entropy) # Sum entropy over the sequence
         
         # 3. Total Loss
-        # Minimize policy loss and negative entropy bonus
-        loss = policy_loss + self.entropy_coefficient * entropy_bonus
+        # Minimize policy loss and negative entropy bonus (using dynamic coefficient)
+        loss = policy_loss + current_entropy_coef * entropy_bonus
         loss = loss.to(self.device)
         # --- End Calculate Loss ---
 
@@ -421,7 +474,10 @@ class CodeGenerator:
         policy_loss_val = policy_loss.item()
         entropy_bonus_val = entropy_bonus.item()
         logging.info(f"Learn Step: Reward={reward:.4f}, Baseline={self.baseline:.4f}, Advantage={advantage:.4f}")
-        logging.info(f"  Total Loss={current_loss:.4f} (Policy={policy_loss_val:.4f}, EntropyBonus={entropy_bonus_val:.4f} * {self.entropy_coefficient})")
+        # Log the dynamic entropy coefficient used
+        logging.info(f"  Total Loss={current_loss:.4f} (Policy={policy_loss_val:.4f}, EntropyBonus={entropy_bonus_val:.4f} * {current_entropy_coef:.4f})") 
+        if tool_feedback:
+            logging.info(f"  Tool Feedback: {tool_feedback.feedback_type}, Severity: {tool_feedback.severity:.2f}")
 
         # Perform optimization step
         self.optimizer.zero_grad()

@@ -14,6 +14,15 @@ import logging # Import logging
 from logging.handlers import RotatingFileHandler # Use RotatingFileHandler
 from rich.logging import RichHandler # Import RichHandler
 from rich.console import Console # Ensure Console is imported
+import psutil
+
+# Check if the script is already running
+current_script_name = "runner.py"
+current_pid = os.getpid()
+for proc in psutil.process_iter(['pid', 'name']):
+    if proc.info['name'] == current_script_name and proc.info['pid'] != current_pid:
+        print(f"Another instance of {current_script_name} is already running. Exiting.")
+        sys.exit(1)
 
 # Rich UI components
 from rich.console import Console
@@ -451,10 +460,16 @@ def main():
     hints_requested = 0 # Add counter for hints requested
     hints_provided = 0  # Add counter for hints provided
     
+    # Add timing tracking
+    start_time = time.time()
+    last_progress_update = start_time
+    attempt_times = []  # Keep track of recent attempt times for rate calculation
+    RATE_WINDOW = 100  # Number of attempts to average for rate calculation
+    
     # Create the Rich layout
     layout = Layout()
     layout.split(
-        Layout(name="header", size=3),
+        Layout(name="header", size=5),  # Increased size for progress and timing info
         Layout(name="main"),
         Layout(name="footer", size=3)
     )
@@ -486,9 +501,61 @@ def main():
                     attempt_count += 1
                     attempts_since_last_check += 1
                     
-                    # ... (Update progress) ...
+                    # Update timing statistics
+                    current_time = time.time()
+                    attempt_times.append(current_time)
+                    if len(attempt_times) > RATE_WINDOW:
+                        attempt_times.pop(0)
+                    
+                    # Calculate timing metrics
+                    elapsed_time = current_time - start_time
+                    if len(attempt_times) >= 2:
+                        current_rate = len(attempt_times) / (attempt_times[-1] - attempt_times[0])
+                    else:
+                        current_rate = 0
+                    
+                    remaining_attempts = max_attempts - attempt_count
+                    if current_rate > 0:
+                        estimated_time_remaining = remaining_attempts / current_rate
+                    else:
+                        estimated_time_remaining = float('inf')
+                    
+                    # Create timing panel content
+                    def format_time(seconds):
+                        if seconds == float('inf'):
+                            return "∞"
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        if hours > 0:
+                            return f"{hours}h {minutes}m {secs}s"
+                        elif minutes > 0:
+                            return f"{minutes}m {secs}s"
+                        else:
+                            return f"{secs}s"
+                    
+                    timing_table = Table(show_header=False, box=None)
+                    timing_table.add_row("Elapsed Time", format_time(elapsed_time))
+                    timing_table.add_row("Est. Remaining", format_time(estimated_time_remaining))
+                    timing_table.add_row("Current Rate", f"{current_rate:.1f} attempts/sec")
+                    timing_table.add_row("Avg Time/Attempt", f"{(elapsed_time/attempt_count):.2f}s")
+                    
+                    # Update progress and timing panel
                     progress.update(task_id, completed=attempt_count, percentage=100*attempt_count/max_attempts)
-                    layout["header"].update(Panel(progress, title="AltLAS Progress", border_style="blue"))
+                    
+                    # Create a new layout just for the header content
+                    header_content = Layout()
+                    header_content.split(
+                        Layout(progress, size=3),
+                        Layout(timing_table)
+                    )
+                    
+                    header_panel = Panel(
+                        header_content,
+                        title="AltLAS Progress",
+                        border_style="blue"
+                    )
+                    layout["header"].update(header_panel)
                     
                     # ... (Periodic Logging) ...
                     if log_frequency > 0 and attempt_count % log_frequency == 0:
@@ -571,7 +638,8 @@ def main():
                     result = executor.execute(code_attempt)
                     
                     # ... (Score Result) ...
-                    score = scorer.score(result, current_task)
+                    # Pass code_attempt to scorer for syntax check
+                    score = scorer.score(code_attempt, result, current_task)
                     
                     # ... (Update status message) ...
                     status_messages.insert(0, f"📝 [{time.strftime('%H:%M:%S')}] Attempt {attempt_count} scored {score:.2f}")
@@ -584,7 +652,25 @@ def main():
                     logger.log_attempt(attempt_count, code_attempt, result, score, fingerprint)
                     
                     # ... (Perform Learning Step) ...
-                    generator.learn(score, generated_ids)
+                    # Calculate dynamic entropy coefficient
+                    if attempt_count > 0: # Avoid division by zero
+                        success_rate = success_count / attempt_count
+                        # Anneal entropy: start high, decrease as success rate increases
+                        annealing_factor = 1.0 - success_rate
+                        current_entropy_coef = (
+                            generator.min_entropy_coefficient + 
+                            (generator.max_entropy_coefficient - generator.min_entropy_coefficient) * annealing_factor
+                        )
+                        # Ensure it doesn't go below the minimum
+                        current_entropy_coef = max(generator.min_entropy_coefficient, current_entropy_coef)
+                    else:
+                        current_entropy_coef = generator.max_entropy_coefficient # Start with max entropy
+                    
+                    # Create tool feedback from execution result
+                    tool_feedback = scorer.get_tool_feedback(code_attempt, result)
+                    
+                    # Pass the dynamic coefficient and tool feedback to the learn method
+                    generator.learn(score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
                     
                     # --- Update Rich UI --- 
                     best_score_val, best_attempt_num = logger.get_best_score_info()
@@ -596,6 +682,8 @@ def main():
                     stats_table.add_row("Unsafe Attempts", str(unsafe_count))
                     stats_table.add_row("Hints Requested", str(hints_requested))
                     stats_table.add_row("Hints Provided", str(hints_provided))
+                    # Add current entropy coef to stats display
+                    stats_table.add_row("Current Entropy Coef", f"{current_entropy_coef:.4f}") 
                     layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
                     status_panel = Text("\n".join(status_messages[:15]))
                     layout["status"].update(Panel(status_panel, title="Status Messages", border_style="yellow"))

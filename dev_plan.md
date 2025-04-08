@@ -6,10 +6,14 @@ This document outlines the development plan for improving the AltLAS reinforceme
 
 ## Current Issues
 
-- **Excessive Hinting**: The system provides hints far too frequently (~every 15 attempts)
-- **Poor Generated Code Quality**: Best attempts show non-functional patterns (strings of "a" characters)
-- **Model Initialization Concerns**: Initial weights may not be properly initialized
+✓ FIXED
+✓ IMPROVED
+✓ FIXED
 - **Training Signal Problems**: The model isn't learning effectively based on scores/rewards
+  - Partially addressed through reward shaping and dynamic entropy, but still needs improvement
+- **Code Structure Understanding**: Model lacks awareness of code hierarchies and syntax structures
+- **Task Complexity Scaling**: Current architecture may struggle with more complex programming tasks
+- **Resource Management**: Need better control over computational resources per task
 
 ## Implementation Plan
 
@@ -63,18 +67,21 @@ Each task below should be completed while preserving existing functionality. Tas
 **Goal**: Improve the learning signal to promote more effective exploration and learning
 
 - [✓] **3.1 Enhance Reward Mechanism in `scorer.py`**
-  - [✓] Add more nuanced scoring for early attempts (higher base score for errors)
+  - [✓] Add more nuanced scoring for early attempts (higher base score for errors/syntax validity)
   - [ ] Implement reward normalization to prevent scaling issues
   - [✓] Create difficulty-appropriate reward scales (using `difflib` for partial scores)
+  - [✓] Add reward shaping based on syntax validity (0.15 for valid Python)
 
 - [✓] **3.2 Adjust Learning Mechanisms in `generator.py`**
   - [✓] Add entropy regularization to encourage exploration
   - [✓] Implement gradient clipping to prevent training instability
+  - [✓] Create dynamic entropy coefficient based on success rate
   - [ ] Create dynamic learning rate based on performance
 
 - [✓] **3.3 Improve REINFORCE Implementation**
   - [✓] Verify correct gradient flow and parameter updates (added logging)
   - [✓] Add baseline for variance reduction (EMA baseline)
+  - [✓] Fix policy gradient calculation to properly scale with advantage
   - [ ] Support for experience replay of successful attempts
 
 ### 4. Tokenization and Vocabulary Improvements
@@ -162,25 +169,99 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Implement logic to save state on clean exit (success, max attempts, Ctrl+C) but not on error.
   - [✓] Update final summary message for user interruption.
 
+### 9. Task Configuration and Scaling [NEW]
+
+**Goal**: Improve task configuration system to better handle varying complexity levels
+
+- [✓] **9.1 Implement Task-Specific Generation Limits**
+  - [✓] Add `max_tokens` field to task JSON schema
+  - [✓] Update TaskLoader to handle optional max_tokens
+  - [✓] Modify generator to respect task-specific limits
+  - [✓] Set appropriate default in config.ini (200 tokens)
+
+- [ ] **9.2 Task Complexity Management**
+  - [ ] Add task difficulty ratings (e.g., beginner, intermediate, advanced)
+  - [ ] Implement progressive task selection based on agent performance
+  - [ ] Track success rates per difficulty level
+  - [ ] Add task prerequisites/dependencies
+
+- [ ] **9.3 Task Resource Management**
+  - [ ] Add memory limits per task
+  - [ ] Add CPU/time constraints per task
+  - [ ] Implement resource monitoring and enforcement
+  - [ ] Add task-specific timeout values
+
+### 10. Model Architecture Improvements [NEW]
+
+**Goal**: Enhance the neural architecture to better handle code generation
+
+- [ ] **10.1 Attention Mechanisms**
+  - [ ] Add self-attention layer to better handle long-range dependencies
+  - [ ] Implement position encoding for token positions
+  - [ ] Add cross-attention for task/hint integration
+  - [ ] Implement multi-head attention
+
+- [ ] **10.2 Hierarchical Generation**
+  - [ ] Add code structure prediction (function, class, loop, etc.)
+  - [ ] Implement two-stage generation (structure then details)
+  - [ ] Add syntax tree-aware generation
+  - [ ] Implement beam search for better exploration
+
+- [ ] **10.3 Context Integration**
+  - [ ] Add task embedding to condition generation
+  - [ ] Implement better hint integration mechanism
+  - [ ] Add error message understanding
+  - [ ] Implement code context window
+
+### 11. Tool Feedback Integration [NEW]
+
+**Goal**: Formalize the tool-based feedback mechanism and enhance learning from execution results
+
+- [ ] **11.1 Structured Tool Feedback**
+  - [ ] Create a standardized `ToolFeedback` class to encapsulate tool outputs
+  - [ ] Extract detailed feedback features from execution results (error types, syntax issues, runtime behavior)
+  - [ ] Implement feedback classification (syntax error, runtime error, logic error, etc.)
+  - [ ] Add feedback severity levels
+
+- [ ] **11.2 Enhanced Learning from Tool Results**
+  - [ ] Create target embedding vectors based on tool feedback categories
+  - [ ] Implement differential weighting of tokens based on their likely contribution to errors
+  - [ ] Add execution trace analysis to pinpoint error-causing tokens
+  - [ ] Implement error-type specific learning rates
+
+- [ ] **11.3 Tool Feedback Exploration**
+  - [ ] Implement a feedback-guided exploration strategy
+  - [ ] Add intentional variation in code patterns that previously received positive feedback
+  - [ ] Create a "feedback memory" to track which patterns cause which types of tool responses
+  - [ ] Implement a curriculum that introduces more complex tool interactions gradually
+
 ## Priority Order
 
-1. **First Priority: Hint System Optimization (1.1, 1.2)** - [✓]
-   - This will have immediate impact by reducing external guidance
-   
-2. **Second Priority: Model Initialization (2.1, 2.2, 7.1)** - [✓]
-   - Addresses the root cause of poor code generation quality
-   
-3. **Third Priority: Training Signal Enhancement (3.1, 3.2)** - [✓]
-   - Improves the learning dynamics once initialization is fixed
-   
-4. **Fourth Priority: Fingerprinting Improvements (5.1, 5.2)** - [✓]
-   - Reduces wasted learning cycles on repeated failures
-   
-5. **Fifth Priority: Monitoring and Analytics (6.1, 7.2)** - [✓]
-   - Provides visibility into training process for further refinement
+**Current Priorities:**
 
-6. **Sixth Priority: Vocabulary and Tokenization (4.1, 4.2)** - [✓]
-   - Addresses underlying representation for long-term improvement
+1. **First Priority: Model Architecture Enhancement (10.1, 10.2)**
+   - Implement attention mechanisms and hierarchical generation
+   - Critical for handling more complex code structures
+   
+2. **Second Priority: Task Complexity Management (9.2)**
+   - Add task difficulty progression system
+   - Enable systematic advancement to harder problems
+   
+3. **Third Priority: Training Signal Refinement**
+   - Add experience replay for successful attempts (3.3)
+   - Implement dynamic learning rate (3.2)
+   
+4. **Fourth Priority: Code Structure Understanding**
+   - Add INDENT/DEDENT token support (4.2)
+   - Implement syntax tree-aware generation (10.2)
+   
+5. **Fifth Priority: Resource Management (9.3)**
+   - Add task-specific resource limits
+   - Implement monitoring and enforcement
+
+6. **Sixth Priority: Context Integration (10.3)**
+   - Improve task and hint integration
+   - Add error message understanding
 
 ## Tracking Progress
 
@@ -194,6 +275,7 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-07:** Completed initial implementation pass for priorities 1-6 and part of 7. Key changes include: reduced hinting frequency, explicit weight initialization & validation, improved REINFORCE (baseline, entropy, clipping), expanded vocabulary, improved tokenizer (greedy matching), enhanced fingerprinting (case-sensitive), extensive logging additions, benchmark task creation, and CLI task selection.
 *   **Observation:** Running `benchmark_add_two_numbers` showed successful initialization and functioning training loop. Code quality improved from nonsensical strings but still requires significant training to solve the task. Hinting is now much less frequent.
 *   **Next Steps:** Focus on longer training runs, analyzing logs (Task 7.2), refining tokenizer (INDENT/DEDENT), and potentially adding more complex duplicate handling (Task 5.2). Implemented graceful Ctrl+C handling in runner.py. Centralized logging with RichHandler to fix UI disruption.
+*   **2025-04-08:** Implemented reward shaping in `scorer.py` based on syntax validity (0.15 for valid syntax, 0.05 for invalid) to provide a better learning gradient. Corrected REINFORCE policy loss calculation in `generator.py`. Added dynamic entropy coefficient that decreases as success rate increases. Implemented task-specific max_tokens to better handle varying task complexities.
 
 ---
 

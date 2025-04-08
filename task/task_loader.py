@@ -18,6 +18,7 @@ class Task:
     name: str
     description: str
     success_criteria: dict
+    max_tokens: Optional[int] = None  # New field with default None
     
     def __str__(self):
         return f"Task: {self.name} - {self.description}"
@@ -58,16 +59,20 @@ class TaskLoader:
             # Ensure the name in the file matches the requested task_name
             if task_data.get("name") != task_name:
                 logging.warning(f"Task name in file '{task_data.get('name')}' does not match requested name '{task_name}'. Using requested name.")
-                # Decide whether to override or raise error. Let's override for now.
-                # task_data["name"] = task_name 
 
-            # Create Task object
+            # Create Task object with optional max_tokens
             task = Task(
-                name=task_name, # Use the requested name
+                name=task_name,  # Use the requested name
                 description=task_data["description"],
-                success_criteria=task_data["success_criteria"]
+                success_criteria=task_data["success_criteria"],
+                max_tokens=task_data.get("max_tokens")  # Will be None if not specified
             )
-            logging.info(f"Successfully loaded task '{task_name}' from {task_file_path}")
+            
+            if task.max_tokens is not None:
+                logging.info(f"Task '{task_name}' loaded with max_tokens={task.max_tokens}")
+            else:
+                logging.info(f"Task '{task_name}' loaded without max_tokens specification")
+            
             return task
             
         except json.JSONDecodeError as e:

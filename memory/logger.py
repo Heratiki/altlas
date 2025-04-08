@@ -101,3 +101,23 @@ class AttemptLogger:
     def get_best_score_info(self):
         """Get the best score achieved so far and the attempt number."""
         return self.best_score, self.best_attempt_number
+        
+    def get_attempt(self, attempt_number: int):
+        """Get a specific attempt by its number.
+        
+        Args:
+            attempt_number (int): The attempt number to retrieve.
+            
+        Returns:
+            dict: The attempt data, or None if not found.
+        """
+        # First check if it's the best attempt since we track that specially
+        if attempt_number == self.best_attempt_number:
+            return self.best_attempt
+            
+        # Otherwise search through attempts
+        for attempt in self.attempts:
+            if attempt['attempt_number'] == attempt_number:
+                return attempt
+                
+        return None

@@ -684,6 +684,9 @@ def main():
                     stats_table.add_row("Hints Provided", str(hints_provided))
                     # Add current entropy coef to stats display
                     stats_table.add_row("Current Entropy Coef", f"{current_entropy_coef:.4f}") 
+                    # Add highest current score and the run that produced it to the statistics area
+                    stats_table.add_row("Highest Score", f"{best_score_val:.2f}")
+                    stats_table.add_row("Best Attempt", str(best_attempt_num))
                     layout["stats"].update(Panel(stats_table, title="Statistics", border_style="green"))
                     status_panel = Text("\n".join(status_messages[:15]))
                     layout["status"].update(Panel(status_panel, title="Status Messages", border_style="yellow"))

@@ -81,6 +81,12 @@ class AltLAS_RNN(nn.Module):
                 logging.info(f"  LSTM {name} initialized (Zeros, forget gate bias=1). Shape: {param.shape}")
         logging.info("Weight initialization complete.")
 
+    # Add reinitialization method for weights
+    def reinitialize_weights(self):
+        """Reinitialize model weights to avoid pathological states."""
+        self._initialize_weights()
+        logging.info("Model weights reinitialized.")
+
     def forward(self, input_seq: torch.Tensor, hidden_state: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Defines the forward pass of the model.

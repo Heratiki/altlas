@@ -46,7 +46,7 @@ class AttemptScorer:
         base_syntax_score = 0.05 # Base score if syntax is invalid
         try:
             ast.parse(code_attempt)
-            base_syntax_score = 0.15 # Higher base score if syntax is valid
+            base_syntax_score = 0.25 # Higher base score for valid syntax
             logging.debug(f"Scorer: Syntax check passed for attempt. Base score: {base_syntax_score}")
         except SyntaxError:
             logging.debug(f"Scorer: Syntax check failed (SyntaxError). Base score: {base_syntax_score}")

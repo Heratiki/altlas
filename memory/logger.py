@@ -6,50 +6,72 @@ import json
 import time
 from pathlib import Path
 import os
+import logging
 
 class AttemptLogger:
     """Logs code attempts and their results."""
     
     def __init__(self, log_dir=None):
-        if log_dir is None:
-            log_dir = Path(__file__).parent / 'logs'
-            
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
+        """Initialize the logger.
         
+        Args:
+            log_dir: Directory to store log files. Defaults to memory/logs.
+        """
+        if log_dir is None:
+            log_dir = Path(__file__).parent / "logs"
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize state
         self.attempts = []
         self.best_score = 0.0
-        self.best_attempt_number = 0 # Track which attempt got the best score
+        self.best_attempt_number = None
         self.best_attempt = None
         
-    def log_attempt(self, attempt_number: int, code: str, result, score: float, fingerprint: str):
-        """Log a code attempt with its result and score.
+        # Load historical attempts if they exist
+        self._load_history()
 
-        Args:
-            attempt_number (int): The current attempt number.
-            code (str): The generated code.
-            result (ExecutionResult): The execution result.
-            score (float): The attempt's score.
-            fingerprint (str): The attempt's fingerprint.
-        """
-        # FUTURE INTENT: The logging mechanism can be significantly enhanced:
-        # 1.  Structured Logging: Use a more structured format (e.g., JSON lines) for easier parsing and analysis.
-        # 2.  Selective Logging: Implement more sophisticated criteria for what constitutes a "valuable" attempt
-        #     worth logging in detail vs. just summarizing. This could be based on score thresholds, novelty,
-        #     specific error types encountered, or reduction in error complexity.
-        # 3.  Metadata: Log richer metadata, such as the generator state (e.g., weights used), hint received (if any),
-        #     task parameters, execution resource usage (CPU/memory if available from executor).
-        # 4.  Database Backend: For larger scale runs, logging to files might become inefficient. Consider using
-        #     a database (like SQLite initially, or potentially a NoSQL DB) for better querying and management.
-        # 5.  Error Classification: Log categorized error types (SyntaxError, NameError, TypeError, etc.) 
-        #     extracted from `result.stderr` to provide more specific feedback for learning.
+    def _load_history(self):
+        """Load historical attempts from disk."""
+        history_file = self.log_dir / "attempt_history.json"
+        try:
+            if history_file.exists():
+                with open(history_file, 'r') as f:
+                    data = json.load(f)
+                    self.attempts = data.get('attempts', [])
+                    self.best_score = data.get('best_score', 0.0)
+                    self.best_attempt_number = data.get('best_attempt_number')
+                    self.best_attempt = data.get('best_attempt')
+                logging.info(f"Loaded {len(self.attempts)} historical attempts.")
+        except Exception as e:
+            logging.error(f"Error loading attempt history: {e}", exc_info=True)
+            # Start fresh if there's an error
+            self.attempts = []
+            self.best_score = 0.0
+            self.best_attempt_number = None
+            self.best_attempt = None
+
+    def _save_history(self):
+        """Save the full attempt history to disk."""
+        history_file = self.log_dir / "attempt_history.json"
+        try:
+            data = {
+                'attempts': self.attempts,
+                'best_score': self.best_score,
+                'best_attempt_number': self.best_attempt_number,
+                'best_attempt': self.best_attempt
+            }
+            with open(history_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logging.error(f"Error saving attempt history: {e}", exc_info=True)
+
+    def log_attempt(self, attempt_number: int, code: str, result, score: float, fingerprint: str):
+        """Log a code attempt and its results."""
         attempt = {
-            'timestamp': time.time(),
+            'attempt_number': attempt_number,
             'code': code,
-            'attempt_number': attempt_number, # Store attempt number
             'fingerprint': fingerprint,
-            # FUTURE INTENT: Store the full ExecutionResult object or its dict representation 
-            # instead of manually copying fields, ensuring all execution details are captured.
             'result': {
                 'status': result.status if result else 'unsafe_or_duplicate',
                 'stdout': result.stdout if result else '',
@@ -65,11 +87,15 @@ class AttemptLogger:
         # Update best score
         if score > self.best_score:
             self.best_score = score
-            self.best_attempt_number = attempt_number # Update best attempt number
+            self.best_attempt_number = attempt_number
             self.best_attempt = attempt
             
-            # Save the best attempt to disk
+            # Save the best attempt separately
             self._save_best_attempt()
+        
+        # Save full history periodically (every 100 attempts)
+        if attempt_number % 100 == 0:
+            self._save_history()
     
     def _save_best_attempt(self):
         """Save the best attempt to disk."""
@@ -87,11 +113,6 @@ class AttemptLogger:
         Returns:
             list: The most recent attempts.
         """
-        # FUTURE INTENT: Retrieving history might become more complex.
-        # - Need efficient ways to retrieve relevant history for specific learning algorithms 
-        #   (e.g., getting attempts with similar code structures, or attempts that failed with specific errors).
-        # - May involve querying a database if the backend changes.
-        # - Could implement different history views (e.g., only successful attempts, only recent failures).
         return self.attempts[-limit:] if self.attempts else []
     
     def get_best_score(self):

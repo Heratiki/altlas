@@ -118,6 +118,16 @@ def save_run_state(attempt_count, task_name, success, best_score=None, best_atte
             "updated": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         
+        # Load and merge existing metrics state if it exists
+        metrics_state_file = Path(__file__).parent / "memory/reports/metrics_state.json"
+        if metrics_state_file.exists():
+            try:
+                with open(metrics_state_file, 'r') as f:
+                    state["report_metrics"] = json.load(f)
+            except Exception as e:
+                log.warning(f"Could not load metrics state: {e}")
+                state["report_metrics"] = {}
+        
         with open(state_file, 'w') as f:
             json.dump(state, f, indent=2)
         
@@ -474,7 +484,9 @@ def reset_training_state():
         project_root / "memory" / "model_state.pth",
         project_root / "memory" / "optimizer_state.pth",
         project_root / "memory" / "logs" / "best_attempt.json",
-        project_root / "memory" / "fingerprints.json"
+        project_root / "memory" / "logs" / "attempt_history.json",  # Add history file
+        project_root / "memory" / "fingerprints.json",
+        project_root / "memory" / "reports" / "metrics_state.json"  # Add metrics state file
     ]
     
     # Add any additional state files found in memory directory

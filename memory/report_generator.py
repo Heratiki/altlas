@@ -6,8 +6,6 @@ Implements periodic reporting to track training progress and identify improvemen
 import os
 import logging
 import difflib
-
-
 import json
 import re
 import statistics
@@ -15,7 +13,6 @@ import collections
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-# Removed incorrect import: from memory.logger import logging
 
 # Default values for placeholders if data is missing
 DEFAULT_PLACEHOLDER = "N/A"
@@ -27,6 +24,8 @@ class TrainingReportGenerator:
             # Resolve template path relative to project root (parent of this file's parent)
             project_root = Path(__file__).parent.parent.resolve()
             self.template_path = project_root / template_path
+            self.metrics_state_file = self.report_dir / "metrics_state.json"
+            self.metrics_state = self._load_metrics_state()
 
             logging.info(f"ReportGenerator initialized. Report dir: {self.report_dir}, Template path: {self.template_path}")
 
@@ -44,6 +43,71 @@ class TrainingReportGenerator:
             logging.error(f"Error during TrainingReportGenerator initialization: {e}", exc_info=True)
             # Re-raise the exception to prevent using a potentially broken generator
             raise
+
+    def _load_metrics_state(self) -> Dict:
+        """Load the persistent metrics state from disk."""
+        if self.metrics_state_file.exists():
+            try:
+                with open(self.metrics_state_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"Error loading metrics state: {e}", exc_info=True)
+        
+        # Return default state if file doesn't exist or has error
+        return {
+            'all_time_high_score': 0.0,
+            'all_time_high_code': DEFAULT_PLACEHOLDER,
+            'all_time_high_output': DEFAULT_PLACEHOLDER,
+            'all_time_low_score': 1.0,
+            'all_time_low_code': DEFAULT_PLACEHOLDER,
+            'all_time_low_output': DEFAULT_PLACEHOLDER,
+            'cumulative_error_counts': {},
+            'historical_patterns': {
+                'successful': [],
+                'failed': []
+            },
+            'last_report_metrics': {},
+        }
+
+    def _save_metrics_state(self):
+        """Save the current metrics state to disk."""
+        try:
+            with open(self.metrics_state_file, 'w') as f:
+                json.dump(self.metrics_state, f, indent=2)
+        except Exception as e:
+            logging.error(f"Error saving metrics state: {e}", exc_info=True)
+
+    def _update_metrics_state(self, metrics: Dict):
+        """Update the persistent metrics state with new metrics."""
+        # Update all-time bests
+        if metrics['high_score'] > self.metrics_state['all_time_high_score']:
+            self.metrics_state['all_time_high_score'] = metrics['high_score']
+            self.metrics_state['all_time_high_code'] = metrics['high_scoring_code']
+            self.metrics_state['all_time_high_output'] = metrics['high_scoring_output']
+
+        # Update all-time worsts (if lower)
+        if metrics['low_score'] < self.metrics_state['all_time_low_score']:
+            self.metrics_state['all_time_low_score'] = metrics['low_score']
+            self.metrics_state['all_time_low_code'] = metrics['low_scoring_code']
+            self.metrics_state['all_time_low_output'] = metrics['low_scoring_output']
+
+        # Update cumulative error counts
+        for error_type, count in metrics['error_counts'].items():
+            if error_type in self.metrics_state['cumulative_error_counts']:
+                self.metrics_state['cumulative_error_counts'][error_type] += count
+            else:
+                self.metrics_state['cumulative_error_counts'][error_type] = count
+
+        # Store current metrics for next comparison
+        self.metrics_state['last_report_metrics'] = {
+            'success_rate': metrics.get('success_rate', 0.0),
+            'moving_avg_score': metrics.get('moving_avg_score', 0.0),
+            'high_score': metrics.get('high_score', 0.0),
+            'entropy_coefficient': metrics.get('entropy_coefficient', 0.0)
+        }
+
+        # Save updated state
+        self._save_metrics_state()
 
     def _load_template(self) -> str:
         """Loads the Markdown report template."""
@@ -278,6 +342,9 @@ class TrainingReportGenerator:
             success_count (int): Number of successful attempts.
         """
         try:
+            # Initialize status messages list
+            status_messages = []
+            
             template = self._load_template()
             now = datetime.utcnow()
             timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -296,6 +363,19 @@ class TrainingReportGenerator:
             # --- Generate Insights ---
             generated_insights = self._generate_insights(metrics, history, hints_provided)
 
+            # --- Calculate Changes from Previous Report ---
+            previous_metrics = self.metrics_state.get('last_report_metrics', {})
+            success_rate_change = success_rate - previous_metrics.get('success_rate', 0.0)
+            score_change = metrics['moving_avg_score'] - previous_metrics.get('moving_avg_score', 0.0)
+            high_score_change = metrics['high_score'] - previous_metrics.get('high_score', 0.0)
+            entropy_change = generator_state.get('max_entropy_coefficient', 0.0) - previous_metrics.get('entropy_coefficient', 0.0)
+
+            # --- Check All-Time Bests ---
+            all_time_high_score = self.metrics_state.get('all_time_high_score', 0.0)
+            if metrics['high_score'] > all_time_high_score:
+                status_messages.insert(0, f"🏆 New all-time best score: {metrics['high_score']:.4f}")
+                logging.info(f"New all-time best score achieved: {metrics['high_score']:.4f}")
+
             # --- Prepare Data Dictionary for Template ---
             report_data = {
                 'timestamp': timestamp_str,
@@ -309,25 +389,35 @@ class TrainingReportGenerator:
                 'moving_avg_score': metrics['moving_avg_score'],
                 'score_trend': metrics['score_trend'],
                 'learning_rate': generator_state.get('current_learning_rate', DEFAULT_PLACEHOLDER),
-                # Use max entropy coeff for now, could show min/max later
                 'entropy_coefficient': generator_state.get('max_entropy_coefficient', DEFAULT_PLACEHOLDER),
 
-                'high_score': metrics['high_score'],
-                'highest_scoring_code': metrics['high_scoring_code'],
-                'highest_scoring_output': metrics['high_scoring_output'],
-                'low_score': metrics['low_score'],
-                'lowest_scoring_code': metrics['low_scoring_code'],
-                'lowest_scoring_output': metrics['low_scoring_output'],
+                # Use all-time bests if better than current
+                'high_score': max(metrics['high_score'], self.metrics_state.get('all_time_high_score', 0.0)),
+                'highest_scoring_code': (metrics['high_scoring_code'] 
+                    if metrics['high_score'] >= self.metrics_state.get('all_time_high_score', 0.0)
+                    else self.metrics_state.get('all_time_high_code', DEFAULT_PLACEHOLDER)),
+                'highest_scoring_output': (metrics['high_scoring_output']
+                    if metrics['high_score'] >= self.metrics_state.get('all_time_high_score', 0.0)
+                    else self.metrics_state.get('all_time_high_output', DEFAULT_PLACEHOLDER)),
+                
+                # Use all-time worsts for comparison
+                'low_score': min(metrics['low_score'], self.metrics_state.get('all_time_low_score', 1.0)),
+                'lowest_scoring_code': (metrics['low_scoring_code']
+                    if metrics['low_score'] <= self.metrics_state.get('all_time_low_score', 1.0)
+                    else self.metrics_state.get('all_time_low_code', DEFAULT_PLACEHOLDER)),
+                'lowest_scoring_output': (metrics['low_scoring_output']
+                    if metrics['low_score'] <= self.metrics_state.get('all_time_low_score', 1.0)
+                    else self.metrics_state.get('all_time_low_output', DEFAULT_PLACEHOLDER)),
 
                 # Common Patterns (Basic Keyword Counts) - Top 3
                 'pattern_1': metrics['successful_patterns'][0] if len(metrics['successful_patterns']) > 0 else DEFAULT_PLACEHOLDER,
                 'pattern_2': metrics['successful_patterns'][1] if len(metrics['successful_patterns']) > 1 else DEFAULT_PLACEHOLDER,
                 'pattern_3': metrics['successful_patterns'][2] if len(metrics['successful_patterns']) > 2 else DEFAULT_PLACEHOLDER,
-                'failed_pattern_1': metrics['failed_patterns'][0] if len(metrics['failed_patterns']) > 0 else DEFAULT_PLACEHOLDER, # Assuming template uses {FAILED_PATTERN_X}
+                'failed_pattern_1': metrics['failed_patterns'][0] if len(metrics['failed_patterns']) > 0 else DEFAULT_PLACEHOLDER,
                 'failed_pattern_2': metrics['failed_patterns'][1] if len(metrics['failed_patterns']) > 1 else DEFAULT_PLACEHOLDER,
                 'failed_pattern_3': metrics['failed_patterns'][2] if len(metrics['failed_patterns']) > 2 else DEFAULT_PLACEHOLDER,
 
-                # Common Errors Table (Top 3)
+                # Common Errors Table (Cumulative + Current)
                 'error_type_1': DEFAULT_PLACEHOLDER, 'count_1': DEFAULT_PLACEHOLDER, 'error_example_1': DEFAULT_PLACEHOLDER,
                 'error_type_2': DEFAULT_PLACEHOLDER, 'count_2': DEFAULT_PLACEHOLDER, 'error_example_2': DEFAULT_PLACEHOLDER,
                 'error_type_3': DEFAULT_PLACEHOLDER, 'count_3': DEFAULT_PLACEHOLDER, 'error_example_3': DEFAULT_PLACEHOLDER,
@@ -337,58 +427,59 @@ class TrainingReportGenerator:
                 'semantic_drift_status': metrics['semantic_drift_status'],
                 'token_distribution_status': token_distribution_status,
                 'hint_usage': hints_provided,
-                'hint_utilization': DEFAULT_PLACEHOLDER, # TODO: Calculate hint utilization
+                'hint_utilization': DEFAULT_PLACEHOLDER,
 
-                # Score Component Weights
+                # Score Component Weights and Values
                 'syntax_weight': scorer_state.get('component_weights', {}).get('syntax', DEFAULT_PLACEHOLDER),
                 'execution_weight': scorer_state.get('component_weights', {}).get('execution', DEFAULT_PLACEHOLDER),
                 'output_weight': scorer_state.get('component_weights', {}).get('output', DEFAULT_PLACEHOLDER),
                 'structural_weight': scorer_state.get('component_weights', {}).get('structural', DEFAULT_PLACEHOLDER),
                 'constraints_weight': scorer_state.get('component_weights', {}).get('constraints', DEFAULT_PLACEHOLDER),
                 'semantic_weight': scorer_state.get('component_weights', {}).get('semantic', DEFAULT_PLACEHOLDER),
-                # TODO: Add average component scores if available/calculable
 
-                # Resource Utilization Placeholders
-                'memory_usage': DEFAULT_PLACEHOLDER, # TODO: Get memory usage
+                # Resource Utilization
+                'memory_usage': DEFAULT_PLACEHOLDER,
                 'avg_gen_time': metrics['avg_gen_time'],
                 'avg_exec_time': metrics['avg_exec_time'],
 
-                # Observations/Recommendations Placeholders
+                # Observations/Recommendations
                 'observations': generated_insights['observations'],
                 'recommendation_1': generated_insights['recommendation_1'],
                 'recommendation_2': generated_insights['recommendation_2'],
                 'recommendation_3': generated_insights['recommendation_3'],
 
-                # Historical Comparison Placeholders
-                'prev_success_rate': DEFAULT_PLACEHOLDER, 'success_rate_change': DEFAULT_PLACEHOLDER,
-                'prev_moving_avg': DEFAULT_PLACEHOLDER, 'score_change': DEFAULT_PLACEHOLDER,
-                'prev_high_score': DEFAULT_PLACEHOLDER, 'high_score_change': DEFAULT_PLACEHOLDER,
-                'prev_entropy': DEFAULT_PLACEHOLDER, 'entropy_change': DEFAULT_PLACEHOLDER,
-                # TODO: Implement loading previous report for comparison
+                # Historical Comparison (from previous report)
+                'prev_success_rate': f"{previous_metrics.get('success_rate', 0.0):.2f}",
+                'success_rate_change': f"{success_rate_change:+.2f}",
+                'prev_moving_avg': f"{previous_metrics.get('moving_avg_score', 0.0):.4f}",
+                'score_change': f"{score_change:+.4f}",
+                'prev_high_score': f"{previous_metrics.get('high_score', 0.0):.4f}",
+                'high_score_change': f"{high_score_change:+.4f}",
+                'prev_entropy': f"{previous_metrics.get('entropy_coefficient', 0.0):.4f}",
+                'entropy_change': f"{entropy_change:+.4f}"
             }
 
-            # Populate Error Table Data
-            top_errors = metrics['error_counts'].most_common(3)
+            # Populate Error Table Data (Combine current and cumulative)
+            combined_errors = metrics['error_counts'] + collections.Counter(self.metrics_state.get('cumulative_error_counts', {}))
+            top_errors = combined_errors.most_common(3)
             for i, (err_type, count) in enumerate(top_errors):
                 report_data[f'error_type_{i+1}'] = err_type
                 report_data[f'count_{i+1}'] = count
                 # Find an example error message
                 example_msg = DEFAULT_PLACEHOLDER
-                for h in reversed(history): # Look backwards for recent example
+                for h in reversed(history):
                     result = h.get('result', {})
                     if result.get('status') == 'error':
                          error_type_full = result.get('error_type', '')
                          if error_type_full.startswith(err_type):
-                             example_msg = error_type_full.split('\n')[0] # Get first line
+                             example_msg = error_type_full.split('\n')[0]
                              break
                 report_data[f'error_example_{i+1}'] = f"`{example_msg}`"
-
 
             # --- Populate Template ---
             report_content = self._populate_template(template, report_data)
 
             # --- Save Report ---
-            timestamp_filename = f"training_report_{session_id}.md"
             timestamp_filename = f"training_report_{session_id}.md"
             report_path = self.report_dir / timestamp_filename
             latest_report_path = self.report_dir / "latest_report.md"
@@ -409,7 +500,9 @@ class TrainingReportGenerator:
                 self._rotate_reports(keep=5)
             except Exception as rot_e:
                 logging.error(f"Error during report rotation: {rot_e}", exc_info=True)
-            # --- End Report Rotation ---
+
+            # Update and save metrics state
+            self._update_metrics_state(metrics)
 
             return str(report_path)
 

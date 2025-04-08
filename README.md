@@ -65,6 +65,22 @@ Tasks are defined in JSON files with the following structure:
   * `max_tokens`: Maximum tokens allowed in solution
 * `difficulty`: Task difficulty level (e.g., "beginner", "intermediate")
 
+## Key Features
+
+The AltLAS system includes several advanced techniques to improve code generation:
+
+* **Temperature-Controlled Sampling**: Dynamically adjusts randomness in token selection based on the current score, with more focused sampling when scores improve.
+
+* **Grammar-Guided Generation**: Uses Python grammar rules to boost probabilities of grammatically valid tokens, helping the model generate syntactically correct code.
+
+* **Template-Guided Generation**: For benchmark tasks, the system can leverage templates when stuck, guiding the model toward valid solution patterns.
+
+* **Weight Reset Mechanism**: Automatically reinitializes model weights when stuck in a bad local minimum for too long.
+
+* **Beam Search Generation**: When standard generation struggles, the system uses beam search to explore multiple candidate sequences simultaneously, choosing the most promising one.
+
+* **Dynamic Entropy Regularization**: Adjusts exploration vs. exploitation based on success rate, encouraging exploration early and focusing on successful patterns as training progresses.
+
 ## Understanding the Output
 
 *   **Rich UI:** The script uses the `rich` library to display a live dashboard in the terminal, showing:

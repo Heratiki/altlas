@@ -1,0 +1,74 @@
+{
+    "name": "benchmark_list_operations",
+    "description": "Benchmark task: Generate code that creates a list containing the numbers [1, 2, 3, 4, 5], then prints the sum of the third and fifth elements.",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "8",
+        "valid_patterns": [
+            {
+                "type": "direct_list_indexing",
+                "pattern": [
+                    "numbers = [1, 2, 3, 4, 5]",
+                    "print(numbers[2] + numbers[4])"
+                ],
+                "variations": [
+                    [
+                        "nums = [1, 2, 3, 4, 5]",
+                        "print(nums[2] + nums[4])"
+                    ],
+                    [
+                        "lst = [1, 2, 3, 4, 5]",
+                        "print(lst[2] + lst[4])"
+                    ]
+                ]
+            },
+            {
+                "type": "variable_extraction",
+                "pattern": [
+                    "numbers = [1, 2, 3, 4, 5]",
+                    "third = numbers[2]",
+                    "fifth = numbers[4]",
+                    "print(third + fifth)"
+                ],
+                "variations": [
+                    [
+                        "nums = [1, 2, 3, 4, 5]",
+                        "a = nums[2]",
+                        "b = nums[4]",
+                        "print(a + b)"
+                    ]
+                ]
+            },
+            {
+                "type": "list_slicing",
+                "pattern": [
+                    "numbers = [1, 2, 3, 4, 5]",
+                    "elements = [numbers[2], numbers[4]]",
+                    "print(sum(elements))"
+                ],
+                "variations": [
+                    [
+                        "nums = [1, 2, 3, 4, 5]",
+                        "print(sum([nums[2], nums[4]]))"
+                    ]
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_operators": [
+            "+"
+        ],
+        "required_numbers": [
+            1,
+            2,
+            3,
+            4,
+            5
+        ],
+        "max_tokens": 40
+    },
+    "difficulty": "intermediate"
+}

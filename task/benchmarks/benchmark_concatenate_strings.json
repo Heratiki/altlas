@@ -1,0 +1,61 @@
+{
+    "name": "benchmark_concatenate_strings",
+    "description": "Benchmark task: Generate code that concatenates the strings 'hello' and 'world' and prints the result.",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "helloworld",
+        "valid_patterns": [
+            {
+                "type": "direct_concatenation",
+                "pattern": "print('hello'+'world')",
+                "variations": [
+                    "print(\"hello\"+\"world\")",
+                    "print('hello' + 'world')",
+                    "print(\"hello\" + \"world\")"
+                ]
+            },
+            {
+                "type": "variable_concatenation",
+                "pattern": [
+                    "a='hello'",
+                    "b='world'",
+                    "print(a+b)"
+                ],
+                "variations": [
+                    [
+                        "s1='hello'",
+                        "s2='world'",
+                        "print(s1+s2)"
+                    ],
+                    [
+                        "first=\"hello\"",
+                        "second=\"world\"",
+                        "print(first+second)"
+                    ]
+                ]
+            },
+            {
+                "type": "join_method",
+                "pattern": "print(''.join(['hello','world']))",
+                "variations": [
+                    "print(\"\".join([\"hello\",\"world\"]))",
+                    "print(''.join(['hello', 'world']))",
+                    "print(\"\".join([\"hello\", \"world\"]))"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_operators": [
+            "+"
+        ],
+        "required_strings": [
+            "hello",
+            "world"
+        ],
+        "max_tokens": 25
+    },
+    "difficulty": "beginner"
+}

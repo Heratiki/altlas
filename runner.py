@@ -376,19 +376,95 @@ def generate_static_hint(prompt: str) -> str:
 # --- End Advisor Implementation ---
 
 
+def reset_training_state():
+    """
+    Fully reset all training state files to ensure a fresh start.
+    This function deletes all files that store state between runs.
+    """
+    log.info("🔄 Resetting all training state files...")
+    
+    # Get the project root directory (where runner.py is)
+    project_root = Path(__file__).parent.absolute()
+    
+    # Define all paths to clear (using absolute paths)
+    paths_to_clear = [
+        project_root / "memory" / "model_state.pth",
+        project_root / "memory" / "optimizer_state.pth",
+        project_root / "memory" / "logs" / "best_attempt.json",
+        project_root / "memory" / "fingerprints.json"
+    ]
+    
+    # Add any additional state files found in memory directory
+    memory_dir = project_root / "memory"
+    for file in memory_dir.glob("*.pth"):
+        if file not in paths_to_clear:
+            paths_to_clear.append(file)
+    
+    # Count of files deleted
+    deleted_count = 0
+    
+    # Delete each file if it exists
+    for path in paths_to_clear:
+        if path.exists():
+            try:
+                path.unlink()
+                log.info(f"✅ Deleted {path}")
+                deleted_count += 1
+            except Exception as e:
+                log.error(f"⚠️ Failed to delete {path}: {e}")
+    
+    # Check logs directory for any other files
+    logs_dir = project_root / "memory" / "logs"
+    if logs_dir.exists():
+        for file in logs_dir.glob("*.json"):
+            try:
+                file.unlink()
+                log.info(f"✅ Deleted additional log file: {file}")
+                deleted_count += 1
+            except Exception as e:
+                log.error(f"⚠️ Failed to delete log file {file}: {e}")
+    
+    if deleted_count > 0:
+        log.info(f"✅ Training state reset complete. {deleted_count} files were deleted.")
+    else:
+        log.warning("⚠️ No training state files were found to delete.")
+    
+    return deleted_count > 0
+
+
 def main():
     """Main runner function that orchestrates the AltLAS workflow."""
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Run the AltLAS Learning Agent.")
     parser.add_argument("--task", type=str, default="hello_world", 
                         help="Name of the task JSON file to load (without .json extension). Defaults to hello_world.")
+    parser.add_argument("--reset", action="store_true", 
+                        help="Reset all training state files and start from attempt 1.")
     args = parser.parse_args()
     task_to_load = args.task
+    reset_training = args.reset
     # --- End Argument Parsing ---
 
     # Use the standard logger. RichHandler will format INFO+ messages for the console.
     log.info(f"🧠 Starting AltLAS - Task: {task_to_load}")
     log.debug("Debug logging is active and directed to file.")
+
+    # Reset training state if requested
+    if reset_training:
+        log.info("🔄 Reset flag detected - clearing all training state files...")
+        reset_successful = reset_training_state()
+        if reset_successful:
+            log.info("✅ Training state reset complete - starting from attempt 1")
+        else:
+            log.warning("⚠️ No training state files were found to delete")
+            
+    # Additional attempt count reset
+    # Create a fresh logger to ensure attempt count starts at 1
+    logger = AttemptLogger()
+    fingerprinter = AttemptFingerprinter()
+    
+    # Ensure attempt count starts at 0 (will increment to 1 on first iteration)
+    attempt_count = 0
 
     # --- Read Config ---
     config = configparser.ConfigParser()
@@ -442,6 +518,11 @@ def main():
     scorer = AttemptScorer(config_path=str(config_path))
     logger = AttemptLogger() # Assuming no config needed yet
     fingerprinter = AttemptFingerprinter() # Uses its own file path logic
+    # Reset attempt count and clear previous log file
+    log_file_path = Path("memory/logs/best_attempt.json")
+    if log_file_path.exists():
+        log_file_path.unlink()
+    attempt_count = 0
 
     success = False
     attempt_count = 0
@@ -612,7 +693,25 @@ def main():
                         attempts_since_last_check = 0
 
                     # ... (Generate Code) ...
-                    code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint)
+                    # Determine which generation method to use based on stuck detection
+                    if consecutive_stuck_count >= 2:
+                        # Use beam search when struggling to make progress
+                        code_attempt, generated_ids = generator.generate_with_beam_search(current_task, logger.get_history(), hint=current_hint)
+                        status_messages.insert(0, f"🔄 [{time.strftime('%H:%M:%S')}] Using beam search generation (stuck count: {consecutive_stuck_count})")
+                        log.info(f"🔄 Using beam search generation due to stuck detection (count: {consecutive_stuck_count})")
+                    else:
+                        # Use standard generation with dynamic temperature
+                        # Get the current best score to determine temperature
+                        current_best_score = logger.get_best_score()
+                        
+                        # Adjust temperature based on best score so far
+                        if current_best_score > 0.3:
+                            temperature = 0.6  # More focused sampling for higher scores
+                        else:
+                            temperature = 0.8  # More exploration for lower scores
+                            
+                        code_attempt, generated_ids = generator.generate(current_task, logger.get_history(), hint=current_hint, temperature=temperature)
+                    
                     if code_attempt is None or generated_ids is None:
                          status_messages.insert(0, f"⚠️ [{time.strftime('%H:%M:%S')}] Generator returned None unexpectedly. Skipping attempt.")
                          continue

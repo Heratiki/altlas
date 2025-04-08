@@ -1,0 +1,76 @@
+{
+    "name": "benchmark_conditional_check",
+    "description": "Benchmark task: Generate code that checks if a number is greater than 10, and prints either 'Greater' or 'Less or equal' depending on the result. Use the number 15 for your check.",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "Greater",
+        "valid_patterns": [
+            {
+                "type": "direct_if_else",
+                "pattern": [
+                    "if 15 > 10:",
+                    "    print('Greater')",
+                    "else:",
+                    "    print('Less or equal')"
+                ],
+                "variations": [
+                    [
+                        "if 15 > 10:",
+                        "    print(\"Greater\")",
+                        "else:",
+                        "    print(\"Less or equal\")"
+                    ]
+                ]
+            },
+            {
+                "type": "variable_if_else",
+                "pattern": [
+                    "x = 15",
+                    "if x > 10:",
+                    "    print('Greater')",
+                    "else:",
+                    "    print('Less or equal')"
+                ],
+                "variations": [
+                    [
+                        "num = 15",
+                        "if num > 10:",
+                        "    print('Greater')",
+                        "else:",
+                        "    print('Less or equal')"
+                    ],
+                    [
+                        "n = 15",
+                        "if n > 10:",
+                        "    print(\"Greater\")",
+                        "else:",
+                        "    print(\"Less or equal\")"
+                    ]
+                ]
+            },
+            {
+                "type": "ternary_operator",
+                "pattern": "print('Greater' if 15 > 10 else 'Less or equal')",
+                "variations": [
+                    "print(\"Greater\" if 15 > 10 else \"Less or equal\")"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_operators": [
+            ">"
+        ],
+        "required_numbers": [
+            15,
+            10
+        ],
+        "required_keywords": [
+            "if"
+        ],
+        "max_tokens": 35
+    },
+    "difficulty": "beginner"
+}

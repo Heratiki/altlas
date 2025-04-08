@@ -1,0 +1,73 @@
+{
+    "name": "benchmark_function_with_return",
+    "description": "Benchmark task: Generate code that defines a function to calculate the average of two numbers and then uses it to calculate the average of 10 and 20.",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "15.0",
+        "valid_patterns": [
+            {
+                "type": "standard_function",
+                "pattern": [
+                    "def average(a, b):",
+                    "    return (a + b) / 2",
+                    "print(average(10, 20))"
+                ],
+                "variations": [
+                    [
+                        "def avg(x, y):",
+                        "    return (x + y) / 2",
+                        "print(avg(10, 20))"
+                    ],
+                    [
+                        "def calculate_average(num1, num2):",
+                        "    return (num1 + num2) / 2",
+                        "print(calculate_average(10, 20))"
+                    ]
+                ]
+            },
+            {
+                "type": "function_with_variables",
+                "pattern": [
+                    "def average(a, b):",
+                    "    result = (a + b) / 2",
+                    "    return result",
+                    "print(average(10, 20))"
+                ],
+                "variations": [
+                    [
+                        "def avg(x, y):",
+                        "    mean = (x + y) / 2",
+                        "    return mean",
+                        "print(avg(10, 20))"
+                    ]
+                ]
+            },
+            {
+                "type": "lambda_function",
+                "pattern": [
+                    "average = lambda a, b: (a + b) / 2",
+                    "print(average(10, 20))"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_keywords": [
+            "def",
+            "return"
+        ],
+        "required_operators": [
+            "+",
+            "/"
+        ],
+        "required_numbers": [
+            10,
+            20,
+            2
+        ],
+        "max_tokens": 50
+    },
+    "difficulty": "intermediate"
+}

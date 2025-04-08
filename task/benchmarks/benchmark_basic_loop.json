@@ -1,0 +1,75 @@
+{
+    "name": "benchmark_basic_loop",
+    "description": "Benchmark task: Generate code that uses a loop to print the sum of numbers from 1 to 5.",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "15",
+        "valid_patterns": [
+            {
+                "type": "for_loop_range",
+                "pattern": [
+                    "sum = 0",
+                    "for i in range(1, 6):",
+                    "    sum += i",
+                    "print(sum)"
+                ],
+                "variations": [
+                    [
+                        "total = 0",
+                        "for n in range(1, 6):",
+                        "    total += n",
+                        "print(total)"
+                    ],
+                    [
+                        "result = 0",
+                        "for x in range(1, 6):",
+                        "    result = result + x",
+                        "print(result)"
+                    ]
+                ]
+            },
+            {
+                "type": "while_loop",
+                "pattern": [
+                    "i = 1",
+                    "sum = 0",
+                    "while i <= 5:",
+                    "    sum += i",
+                    "    i += 1",
+                    "print(sum)"
+                ],
+                "variations": [
+                    [
+                        "count = 1",
+                        "total = 0",
+                        "while count <= 5:",
+                        "    total += count",
+                        "    count += 1",
+                        "print(total)"
+                    ]
+                ]
+            },
+            {
+                "type": "list_comprehension",
+                "pattern": "print(sum([i for i in range(1, 6)]))",
+                "variations": [
+                    "print(sum(range(1, 6)))"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_keywords": [
+            "for",
+            "in"
+        ],
+        "required_numbers": [
+            1,
+            5
+        ],
+        "max_tokens": 45
+    },
+    "difficulty": "intermediate"
+}

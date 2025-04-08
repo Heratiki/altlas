@@ -395,9 +395,9 @@ def main():
         stuck_check_window = runner_config.getint('StuckCheckWindow', 15)
         stuck_threshold = runner_config.getfloat('StuckThreshold', 0.01)
         hint_probability_on_stuck = runner_config.getfloat('HintProbabilityOnStuck', 1.0)
-        max_consecutive_stuck_checks = runner_config.getint('MaxConsecutiveStuckChecks', 3) # Read new param
-        log_frequency = runner_config.getint('LogFrequency', 500) # Read new param
-        top_tokens_to_log = runner_config.getint('TopTokensToLog', 10) # Read new param
+        max_consecutive_stuck_checks = runner_config.getint('MaxConsecutiveStuckChecks', 3) 
+        log_frequency = runner_config.getint('LogFrequency', 500) 
+        top_tokens_to_log = runner_config.getint('TopTokensToLog', 10) 
 
         scorer_config = config['Scorer']
         success_threshold = scorer_config.getfloat('SuccessThreshold', 0.99)

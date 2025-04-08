@@ -72,7 +72,8 @@ class CodeGenerator:
 
             # Optimizer Hyperparameters
             self.learning_rate = optimizer_config.getfloat('LearningRate', 0.001)
-            self.entropy_coefficient = optimizer_config.getfloat('EntropyCoefficient', 0.01) # Read new param
+            # Increase default entropy coefficient from 0.01 to 0.1 for better exploration
+            self.entropy_coefficient = optimizer_config.getfloat('EntropyCoefficient', 0.1) # Increased default
             self.gradient_clip_norm = optimizer_config.getfloat('GradientClipNorm', 1.0)    # Read new param
             self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1) # Read new param
 
@@ -395,17 +396,18 @@ class CodeGenerator:
         # Update baseline using EMA
         self.baseline = self.baseline_ema_alpha * float(reward) + (1 - self.baseline_ema_alpha) * self.baseline
         logging.debug(f"  Reward: {reward:.4f}, Baseline: {self.baseline:.4f}, Advantage: {advantage:.4f}")
+
+        # Removed advantage normalization for now
+        # normalized_advantage = advantage / generated_ids.shape[0] 
         # --- End Advantage Calculation ---
 
         # --- Calculate Loss ---
         # 1. Policy Gradient Loss (REINFORCE with baseline)
-        # Use advantage instead of raw reward
-        policy_loss = -torch.sum(log_prob_actions * advantage)
-        
+        # CORRECTED IMPLEMENTATION: Scale the sum of log probabilities by the advantage
+        policy_loss = -torch.sum(log_prob_actions) * advantage
+
         # 2. Entropy Bonus Calculation
-        # Entropy = - sum(p * log(p)) for each step
-        # We want to maximize entropy, so we minimize negative entropy
-        # Add a small epsilon to prevent log(0)
+        # ... existing code ...
         entropy = -torch.sum(probabilities * torch.log(probabilities + 1e-9), dim=-1)
         entropy_bonus = -torch.sum(entropy) # Sum entropy over the sequence
         

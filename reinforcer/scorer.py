@@ -104,10 +104,32 @@ class AttemptScorer:
             'zero_division_error': 0.3,         # Division errors (math problems)
             'assertion_error': 0.4,             # Assertion errors (test failures but executable)
             'execution_timeout': 0.05,          # Timeouts are serious problems
-            'generic_error': 0.1,               # Default for unclassified errors
         }
         
-        return feedback_scores.get(feedback_type, 0.1)
+        # If it's a generic error, use severity to determine a more dynamic reward
+        if feedback_type == 'generic_error':
+            # Extract error severity if available (default to 0.5 if not)
+            severity = getattr(result, 'error_severity', 0.5)
+            
+            # Calculate a graduated reward based on severity:
+            # - Low severity (0.0-0.3): Better reward (0.2-0.3)
+            # - Medium severity (0.3-0.7): Medium reward (0.1-0.2)
+            # - High severity (0.7-1.0): Lower reward (0.05-0.1)
+            if severity < 0.3:
+                # Less severe errors get better rewards
+                base_score = 0.3 - (severity * 0.33)  # 0.3 down to 0.2
+            elif severity < 0.7:
+                # Medium severity errors
+                base_score = 0.2 - ((severity - 0.3) * 0.25)  # 0.2 down to 0.1
+            else:
+                # Most severe errors
+                base_score = 0.1 - ((severity - 0.7) * 0.167)  # 0.1 down to 0.05
+                
+            # Add a small random variation to avoid getting stuck at exact same values
+            variation = (hash(str(result)) % 100) / 1000  # ±0.05 variation
+            return max(0.05, min(0.35, base_score + variation))
+        
+        return feedback_scores.get(feedback_type, 0.1)  # Still return 0.1 as absolute fallback
     
     def _evaluate_output_match(self, result, task) -> float:
         """Evaluate how well the output matches the expected output."""
@@ -142,16 +164,27 @@ class AttemptScorer:
             return 0.1  # Poor match
     
     def _evaluate_structural_match(self, code_attempt: str, task) -> float:
-        """Evaluate structural similarity to expected patterns in the task."""
+        """Evaluate structural similarity to expected patterns in the task, including code structure patterns."""
         if 'success_criteria' not in task.__dict__ or 'valid_patterns' not in task.success_criteria:
             return 0.0
-            
+
         # Check for exact pattern matches first
         if self._check_exact_pattern_match(code_attempt, task):
             return 0.9  # High score but not 1.0 (reserved for correct output)
-            
-        # Fall back to similarity-based scoring for partial matches
-        return self._calculate_pattern_similarity(code_attempt, task)
+
+        # Additional: Check for structural pattern matches (regex or AST-based)
+        structure_score = 0.0
+        if 'structure_patterns' in task.success_criteria:
+            for pattern in task.success_criteria['structure_patterns']:
+                try:
+                    if re.search(pattern, code_attempt, re.MULTILINE):
+                        structure_score = max(structure_score, 0.2)  # Boost if any pattern matches
+                except Exception:
+                    continue  # Ignore invalid regex
+
+        # Combine similarity score with structure score (capped at 0.9)
+        similarity_score = self._calculate_pattern_similarity(code_attempt, task)
+        return min(0.9, similarity_score + structure_score)
     
     def _check_exact_pattern_match(self, code_attempt: str, task) -> bool:
         """Check if code exactly matches any of the valid patterns."""
@@ -405,3 +438,51 @@ class AttemptScorer:
         return {
             'component_weights': base_weights
         }
+
+    def calculate_reward(self, code_output, success, syntax_valid, execution_valid, has_output, has_structure, has_correct_ops, has_almost_correct_result, correct_format, config):
+        """Calculates reward based on code output and execution status."""
+        reward = 0.0
+
+        # Access reward weights from config
+        # Use config.get('Runner', 'RewardWeights', fallback=...) if stored in config.ini
+        # Or access directly if passed as a dictionary
+        reward_weights = config.get('reward_weights', {
+            "unsafe_code": 0.0,
+            "compiles": 0.1,
+            "produces_output": 0.2,
+            "structured_output": 0.3,
+            "correct_ops": 0.5,
+            "almost_correct": 0.7,
+            "correct_format": 0.9,
+            "correct_simplistic": 0.95,
+            "correct_compiled": 1.0
+        })
+
+        if not syntax_valid:
+            # Penalize unsafe/empty code implicitly by returning 0
+            # Could add specific check if needed: reward = reward_weights["unsafe_code"]
+            return reward_weights.get("unsafe_code", 0.0)
+
+        # Base reward for compiling
+        reward = reward_weights.get("compiles", 0.1)
+
+        # Incremental rewards based on achievements
+        if execution_valid:
+            if has_output:
+                reward = max(reward, reward_weights.get("produces_output", 0.2))
+                if has_structure:
+                    reward = max(reward, reward_weights.get("structured_output", 0.3))
+                    if has_correct_ops:
+                        reward = max(reward, reward_weights.get("correct_ops", 0.5))
+                        if has_almost_correct_result:
+                            reward = max(reward, reward_weights.get("almost_correct", 0.7))
+                            if correct_format:
+                                reward = max(reward, reward_weights.get("correct_format", 0.9))
+                                if success: # Simplistic correct answer (might need refinement)
+                                     reward = max(reward, reward_weights.get("correct_simplistic", 0.95))
+
+        # Full reward for perfect success after compile/run
+        if success and execution_valid:
+            reward = reward_weights.get("correct_compiled", 1.0)
+
+        return reward

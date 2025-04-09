@@ -556,7 +556,17 @@ class TrainingLoop:
                 log.debug(f"Using calculated_reward={calculated_reward:.4f} instead of baseline score={score:.4f}")
                 score = calculated_reward
         
-        # Pass the final score with dynamic coefficient and tool feedback to the learn method
+        # Apply penalty for repeatedly generating failed patterns
+        fingerprint = self.attempt_manager.get_fingerprint(code_attempt)
+        failure_penalty = self.attempt_manager.get_failure_penalty(fingerprint)
+        if failure_penalty > 0:
+            original_score = score
+            score -= failure_penalty
+            score = max(0, score) # Ensure score doesn't go below 0
+            log.info(f"Applied failure penalty of {failure_penalty:.2f} for repeated failed pattern (fingerprint: {fingerprint[:8]}...). Score reduced from {original_score:.4f} to {score:.4f}")
+            self.ui_display.add_status_message(f"📉 Penalty applied for repeated failure ({failure_penalty:.2f})")
+
+        # Pass the final score (potentially penalized) with dynamic coefficient and tool feedback to the learn method
         self.generator.learn(score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
     
     def _update_ui_display(self, code_attempt: str):

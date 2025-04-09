@@ -435,6 +435,8 @@ class AttemptManager:
         else:
             log.warning("⚠️ No training state files were found to delete.")
         
+        return deleted_count > 0
+    
     def get_failure_penalty(self, fingerprint: str) -> float:
         """
         Return penalty factor for repeated failed fingerprints.
@@ -444,4 +446,23 @@ class AttemptManager:
             return min(0.5, 0.1 * fail_count)  # Cap penalty
         return 0.0
 
-        return deleted_count > 0
+    def check_recent_repetitive_failures(self, lookback=20) -> bool:
+        """Check if recent attempts consist mostly of repeated failed patterns."""
+        if len(self.attempts) < lookback:
+            return False
+        
+        recent_attempts = self.attempts[-lookback:]
+        failed_repeated_count = 0
+        threshold_fail_count = 5 # Consider a fingerprint as 'repeatedly failed' if seen >= 5 times in failed_fingerprints
+        
+        for attempt in recent_attempts:
+            fp = attempt.get('fingerprint')
+            # Check if the fingerprint exists and its count in failed_fingerprints meets the threshold
+            if fp and self.failed_fingerprints.get(fp, 0) >= threshold_fail_count:
+                failed_repeated_count += 1
+                
+        # If more than half of recent attempts are known repeated failures
+        is_repetitive = failed_repeated_count > lookback // 2
+        if is_repetitive:
+            log.debug(f"Repetitive failure check: {failed_repeated_count}/{lookback} recent attempts are known high-frequency failures.")
+        return is_repetitive

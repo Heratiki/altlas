@@ -48,7 +48,7 @@ Each task below should be completed while preserving existing functionality. Tas
 - [✓] **1.2 Implement Progressive Hinting Logic in `runner.py`**
   - [✓] Add a consecutive non-improvement counter that increases when best score doesn't improve
   - [✓] Add randomization function (e.g., 1% chance of providing a hint when stuck is detected)
-  - [ ] Implement exponential backoff for hint frequency (longer wait between hints) *Note: Partially done via consecutive checks, but true backoff not implemented yet.*
+  - [✓] Implement exponential backoff for hint frequency (longer wait between hints)
 
 - [✓] **1.3 Create Hint Analytics**
   - [✓] Track and log when hints are requested and provided (via counters)
@@ -131,8 +131,8 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **5.2 Improve Duplicate Handling in `runner.py`**
   - [✓] Add penalty for repeatedly generating similar but ineffective patterns
-  - [ ] Implement memory of failed approaches
-  - [ ] Create "exploration boost" when stuck in repetitive patterns
+  - [✓] Implement memory of failed approaches (via failed_fingerprints tracking)
+  - [✓] Create "exploration boost" when stuck in repetitive patterns (increase temperature)
   - [✓] Add fingerprint hash to duplicate status message for debugging
 
 ### 6. Debugging and Monitoring
@@ -439,11 +439,7 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
     - Added logic to occasionally skip beam search if token distribution becomes highly skewed (Task 12.5).
     - Increased `HintProbabilityOnStuck` to 0.5 and slightly increased entropy coefficients in `config.ini` to encourage more exploration.
     - Fixed indentation error in `AttemptManager.log_attempt`.
+*   **2025-04-09 (2):** Completed Task 5.2 by implementing memory of failed approaches (using `failed_fingerprints` in `AttemptManager`) and adding an exploration boost (increased temperature) in `TrainingLoop._generate_code_attempt` when recent attempts consist mostly of known failed patterns.
+*   **2025-04-09 (3):** Implemented exponential backoff for hint frequency in `TrainingLoop._update_stuck_status` (Task 1.2). The hint probability now decreases by half each time a hint is skipped due to the probability check, making hints progressively rarer if they are not leading to improvements.
 
 ---
-
-## Emergent Learning Philosophy
-
-This plan aims to address technical issues while preserving the core emergent learning philosophy of AltLAS. The system should continue to develop its own approach to coding rather than being heavily guided. Changes to the hint system, training signal, and model initialization are designed to create a more effective learning environment, not to constrain the agent's exploration.
-
-The goal remains to create an agent that learns to code in its own way, with the capacity to tackle increasingly complex tasks across different programming languages.

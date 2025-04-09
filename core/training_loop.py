@@ -107,6 +107,14 @@ class TrainingLoop:
         self.last_improvement_iteration = 0
         self.weight_reset_count = 0
         self.beam_search_cooling_off_period = 0
+        
+        # Hint backoff tracking
+        self.hint_backoff_level = 0
+        
+        # Hint impact tracking
+        self.hint_just_provided = False
+        self.score_before_hint = None
+        self.hint_impact_history = [] # List to store (score_before, score_after) tuples
     
     def set_user_interrupted(self):
         """Set the user interrupted flag."""
@@ -294,7 +302,7 @@ class TrainingLoop:
         stuck_check_window = self.runner_config['stuck_check_window']
         stuck_threshold = self.runner_config['stuck_threshold']
         max_consecutive_stuck_checks = self.runner_config['max_consecutive_stuck_checks']
-        hint_probability_on_stuck = self.runner_config['hint_probability_on_stuck']
+        base_hint_probability_on_stuck = self.runner_config['hint_probability_on_stuck']
         
         if self.attempts_since_last_check >= stuck_check_window:
             current_best_score = self.attempt_manager.get_best_score()
@@ -306,28 +314,37 @@ class TrainingLoop:
                 log.info(f"{status_msg}. Score hasn't improved enough.")
                 
                 if self.consecutive_stuck_count >= max_consecutive_stuck_checks:
-                    if random.random() < hint_probability_on_stuck:
+                    # Calculate effective hint probability with exponential backoff
+                    effective_hint_probability = base_hint_probability_on_stuck / (2 ** self.hint_backoff_level)
+                    log.debug(f"Checking hint probability: base={base_hint_probability_on_stuck:.3f}, backoff_level={self.hint_backoff_level}, effective={effective_hint_probability:.3f}")
+
+                    if random.random() < effective_hint_probability:
                         self.stats["Hints Requested"] += 1
                         self.current_hint = self._get_hint_from_advisor()
                         if self.current_hint:
                             self.ui_display.add_status_message(f"🤔 Hint requested: {self.current_hint[:50]}...")
-                            log.info(f"🤔 Hint requested (Prob: {hint_probability_on_stuck:.2f}): {self.current_hint}")
+                            log.info(f"🤔 Hint requested (Effective Prob: {effective_hint_probability:.3f}): {self.current_hint}")
                             self.stats["Hints Provided"] += 1
+                            self.hint_backoff_level = 0 # Reset backoff after successful hint
                         else:
                             self.ui_display.add_status_message("🤷 Advisor couldn't generate hint")
-                            log.warning(f"🤷 Advisor couldn't generate hint (Prob: {hint_probability_on_stuck:.2f})")
-                        self.consecutive_stuck_count = 0 # Reset after hint attempt
+                            log.warning(f"🤷 Advisor couldn't generate hint (Effective Prob: {effective_hint_probability:.3f})")
+                            # Don't reset backoff if advisor fails
+                        self.consecutive_stuck_count = 0 # Reset stuck count after hint attempt (success or fail)
                     else:
-                        log.info(f"🚫 Hint skipped due to probability ({hint_probability_on_stuck:.2f}) despite meeting consecutive stuck threshold.")
+                        log.info(f"🚫 Hint skipped due to backoff probability (Effective Prob: {effective_hint_probability:.3f}) despite meeting consecutive stuck threshold.")
+                        self.hint_backoff_level += 1 # Increase backoff level when hint is skipped
                         self.current_hint = None
+                        # Keep consecutive_stuck_count high until hint is actually provided or progress is made
                 else:
                     self.current_hint = None # No hint if not reached max consecutive checks
             else:
                 # Progress detected
                 if self.consecutive_stuck_count > 0:
-                    log.info("📈 Progress detected. Resetting consecutive stuck counter.")
+                    log.info("📈 Progress detected. Resetting consecutive stuck counter and hint backoff.")
                     self.ui_display.add_status_message("📈 Progress detected. Resetting stuck counter.")
                 self.consecutive_stuck_count = 0
+                self.hint_backoff_level = 0 # Reset backoff level on progress
                 self.current_hint = None
             
             # Reset check window
@@ -432,9 +449,17 @@ class TrainingLoop:
                                 temperature=temperature
                             )
         
+        # Check for repetitive failures to boost exploration
+        apply_exploration_boost = False
+        if self.attempt_manager.check_recent_repetitive_failures(lookback=30):
+            # If recent history is dominated by known failed patterns, boost exploration
+            apply_exploration_boost = True
+            log.info("Boosting exploration due to recent repetitive failures.")
+            self.ui_display.add_status_message("🚀 Boosting exploration (repetitive failures)")
+
         # Normal generation strategy logic
-        if self.consecutive_stuck_count >= 2 and self.beam_search_cooling_off_period <= 0:
-            # Only use beam search when stuck and not in cooling-off period
+        if self.consecutive_stuck_count >= 2 and self.beam_search_cooling_off_period <= 0 and not apply_exploration_boost:
+            # Only use beam search when stuck, not cooling off, and not boosting exploration
             self.ui_display.add_status_message(f"🔄 Using beam search generation (stuck count: {self.consecutive_stuck_count})")
             log.info(f"🔄 Using beam search generation due to stuck detection (count: {self.consecutive_stuck_count})")
             self.beam_search_uses += 1
@@ -455,8 +480,11 @@ class TrainingLoop:
                 beam_width=beam_width
             )
         else:
-            # Dynamic temperature adjustment based on current progress and scores
-            if current_best_score > 0.5:
+            # Use standard generation with dynamic temperature
+            temperature = 0.8 # Default exploration temperature
+            if apply_exploration_boost:
+                temperature = 1.0 # Max exploration boost
+            elif current_best_score > 0.5:
                 temperature = 0.5  # More focused when we're getting close
             elif current_best_score > 0.3:
                 temperature = 0.7  # Moderate exploration/exploitation balance
@@ -464,9 +492,9 @@ class TrainingLoop:
                 # For lower scores, check if we're stuck in a pattern
                 if self.attempt_count - self.last_improvement_iteration > 500:
                     temperature = 0.9  # High exploration when stuck at low scores
-                else:
-                    temperature = 0.8  # Standard exploration at low scores
+                # else temperature remains 0.8 (default)
             
+            log.debug(f"Using standard generation with temperature: {temperature}")
             return self.generator.generate(
                 self.current_task, 
                 self.attempt_manager.get_history(max_entries=10),

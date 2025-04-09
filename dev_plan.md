@@ -92,13 +92,13 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Add entropy regularization to encourage exploration
   - [✓] Implement gradient clipping to prevent training instability
   - [✓] Create dynamic entropy coefficient based on success rate
-  - [ ] Create dynamic learning rate based on performance
+  - [✓] Create dynamic learning rate based on performance
 
 - [✓] **3.3 Improve REINFORCE Implementation**
   - [✓] Verify correct gradient flow and parameter updates (added logging)
   - [✓] Add baseline for variance reduction (EMA baseline)
   - [✓] Fix policy gradient calculation to properly scale with advantage
-  - [ ] Support for experience replay of successful attempts
+  - [✓] Support for experience replay of successful attempts
 
 ### 4. Tokenization and Vocabulary Improvements
 
@@ -113,12 +113,12 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Enhance encoding/decoding functionality (greedy matching, newline handling)
   - [✓] Add better handling for unknown tokens (basic UNK mapping)
   - [✓] Implement normalization of code before tokenization
-  - [ ] Add handling for INDENT/DEDENT tokens
+  - [✓] Add handling for INDENT/DEDENT tokens
 
 - [✓] **4.3 Add Token Usage Analytics**
   - [✓] Track token distribution in generated code (initialized counter and counting logic in `generator.py`)
-  - [ ] Monitor token co-occurrence patterns
-  - [ ] Identify over/under-utilized tokens
+  - [✓] Monitor token co-occurrence patterns
+  - [✓] Identify over/under-utilized tokens
 
 ### 5. Fingerprinting and Duplicate Detection
 
@@ -208,24 +208,24 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Support multiple valid solution approaches
   - [✓] Add constraints for required operators/numbers
   - [✓] Support whitespace/case sensitivity options
-  - [ ] Add code structure validation patterns
+  - [✓] Add code structure validation patterns
   - [ ] Implement pattern-based hint generation
 
 - [ ] **9.3 Task Resource Management**
-  - [ ] Add memory limits per task
-  - [ ] Add CPU/time constraints per task
-  - [ ] Implement resource monitoring and enforcement
-  - [ ] Add task-specific timeout values
+  - [🔄] Add memory limits per task
+  - [🔄] Add CPU/time constraints per task
+  - [🔄] Implement resource monitoring and enforcement
+  - [🔄] Add task-specific timeout values
 
 ### 10. Model Architecture Improvements [NEW]
 
 **Goal**: Enhance the neural architecture to better handle code generation
 
 - [✓] **10.1 Attention Mechanisms**
-  - [ ] Add self-attention layer to better handle long-range dependencies
-  - [ ] Implement position encoding for token positions
+  - [✓] Add self-attention layer to better handle long-range dependencies
+  - [✓] Implement position encoding for token positions
   - [ ] Add cross-attention for task/hint integration
-  - [ ] Implement multi-head attention
+  - [✓] Implement multi-head attention
 
 - [✓] **10.2 Hierarchical Generation**
   - [✓] Add code structure prediction (function, class, loop, etc.) via grammar rules
@@ -342,6 +342,40 @@ Each task below should be completed while preserving existing functionality. Tas
 - [ ] **14.5 Correlate Tokens with Fingerprints**
   - [ ] Enhance fingerprint logging to include token pattern information.
   - [ ] Use token-fingerprint correlations to cluster outcome patterns and adjust generation strategies accordingly.
+
+### 15. Runner Modularization [NEW]
+
+**Goal**: Refactor `runner.py` into smaller, logically separated modules while maintaining all current functionality and dependencies. This is to improve maintainability and clarity.
+
+- [ ] **15.1 Identify and group responsibilities**:
+  - [ ] Task loading
+  - [ ] Configuration parsing
+  - [ ] Training loop execution
+  - [ ] Logging setup
+  - [ ] Report generation
+  - [ ] UI display (Rich Live layout)
+
+- [ ] **15.2 Split into dedicated modules**:
+  - [ ] `training_loop.py`
+  - [ ] `ui_display.py`
+  - [ ] `config_loader.py`
+  - [ ] `attempt_manager.py`
+  - [ ] Keep `runner.py` only for `main()` orchestration
+
+- [ ] **15.3 Ensure that all current functionality remains intact**:
+  - [ ] Rich-based UI should still work identically
+  - [ ] No change to CLI args (e.g. `--task`, `--reset`)
+  - [ ] Model saving and reporting must still trigger appropriately
+
+- [ ] **15.4 Use dependency injection for component reuse**
+  - [ ] Pass logger, config path, and device context cleanly between modules
+
+- [ ] **15.5 Add backward compatibility validation test**
+  - [ ] Create test to verify all outputs and behaviors match pre-refactor state
+  - [ ] Verify that all CLI options work as before
+  - [ ] Check performance impact of modularization
+
+All refactors must be thoroughly tested and must **not break any current working features**. This is a surgical decomposition to improve architecture while preserving stability.
 
 ## Priority Order
 

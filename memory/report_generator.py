@@ -236,6 +236,25 @@ class TrainingReportGenerator:
              metrics['semantic_drift_status'] = "Not enough history for drift analysis"
         # --- End Semantic Drift Detection ---
 
+        # --- Token Co-occurrence and Utilization ---
+        from collections import defaultdict
+        co_occurrence = defaultdict(lambda: defaultdict(int))
+        token_freq = collections.Counter()
+        recent_attempts = history[-window_size:] if len(history) > window_size else history
+        for h in recent_attempts:
+            tokens = h.get('tokens', [])  # Assumes token IDs or strings stored
+            for i, t1 in enumerate(tokens):
+                token_freq[t1] += 1
+                for t2 in tokens[i+1:]:
+                    co_occurrence[t1][t2] += 1
+                    co_occurrence[t2][t1] += 1
+        metrics['token_co_occurrence'] = {k: dict(v) for k, v in co_occurrence.items()}
+        metrics['token_frequencies'] = dict(token_freq)
+        # Identify over/under-utilized tokens
+        sorted_tokens = sorted(token_freq.items(), key=lambda x: x[1], reverse=True)
+        metrics['overused_tokens'] = sorted_tokens[:5]
+        metrics['underused_tokens'] = [t for t, c in token_freq.items() if c <= 2][:5]
+
 
         return metrics
 
@@ -326,7 +345,9 @@ class TrainingReportGenerator:
                                  scorer_state: Dict,
                                  start_time: float,
                                  hints_provided: int,
-                                 success_count: int):
+                                 success_count: int,
+                                 stuck_events: int = 0,
+                                 beam_search_uses: int = 0):
         """
         Generates a training report based on the current state and saves it.
 
@@ -340,6 +361,8 @@ class TrainingReportGenerator:
             start_time (float): Timestamp when the training run started.
             hints_provided (int): Number of hints provided during the run.
             success_count (int): Number of successful attempts.
+            stuck_events (int): Number of stuck events detected during the run.
+            beam_search_uses (int): Number of times beam search was used during the run.
         """
         try:
             # Initialize status messages list
@@ -456,8 +479,13 @@ class TrainingReportGenerator:
                 'prev_high_score': f"{previous_metrics.get('high_score', 0.0):.4f}",
                 'high_score_change': f"{high_score_change:+.4f}",
                 'prev_entropy': f"{previous_metrics.get('entropy_coefficient', 0.0):.4f}",
-                'entropy_change': f"{entropy_change:+.4f}"
+                'entropy_change': f"{entropy_change:+.4f}",
+                'stuck_events': stuck_events,
+                'beam_search_uses': beam_search_uses
             }
+
+            # Insert stuck/beam info into Score Progression section
+            report_data['score_trend'] += f" (Stuck events: {stuck_events}, Beam search used: {beam_search_uses})"
 
             # Populate Error Table Data (Combine current and cumulative)
             combined_errors = metrics['error_counts'] + collections.Counter(self.metrics_state.get('cumulative_error_counts', {}))

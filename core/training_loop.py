@@ -10,6 +10,8 @@ import json
 import random
 import logging
 import requests
+import collections # Added for deque
+import statistics # Added for mean/stdev
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -136,6 +138,11 @@ class TrainingLoop:
         except ValueError:
             log.warning(f"Invalid ConvergenceThreshold value '{convergence_threshold_str}' in config. Using default 5.")
             self.convergence_threshold = 5
+
+        # Instability monitoring
+        self.gradient_norm_history = collections.deque(maxlen=50) # Store last 50 norms
+        self.last_instability_warning_time = 0
+        self.instability_warning_cooldown = 300 # Seconds between warnings
     
     def set_user_interrupted(self):
         """Set the user interrupted flag."""
@@ -710,8 +717,12 @@ class TrainingLoop:
         # --- End Normalize Score ---
 
         # Pass the NORMALIZED score with dynamic coefficient and tool feedback to the learn method
-        self.generator.learn(normalized_score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
+        # Capture the returned gradient norm
+        gradient_norm = self.generator.learn(normalized_score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
         
+        # Monitor training stability using the gradient norm
+        self._monitor_training_stability(gradient_norm)
+
         # Store the feedback for the next generation step
         self.last_tool_feedback = tool_feedback
     
@@ -1078,3 +1089,40 @@ Provide ONLY the hint without explanation:
         except Exception as e: # Added except block for outer try
             log.warning(f"⚠️ Error calling local LLM: {str(e)}")
             return self._generate_static_hint(prompt)
+
+    def _monitor_training_stability(self, current_grad_norm: Optional[float]):
+        """Monitor gradient norms for potential instability."""
+        if current_grad_norm is None:
+            return # Cannot monitor if norm wasn't calculated
+
+        self.gradient_norm_history.append(current_grad_norm)
+
+        # Need enough history to calculate stats reliably
+        if len(self.gradient_norm_history) < self.gradient_norm_history.maxlen // 2:
+            return
+
+        # Calculate stats on recent norms
+        recent_norms = list(self.gradient_norm_history)
+        mean_norm = statistics.mean(recent_norms)
+        stdev_norm = statistics.stdev(recent_norms) if len(recent_norms) > 1 else 0.0
+
+        # Define thresholds (these might need tuning)
+        exploding_threshold = 50.0
+        vanishing_threshold = 0.01
+        instability_stdev_factor = 2.5 # Stdev > 2.5 * mean might indicate instability
+
+        warning_message = None
+        if mean_norm > exploding_threshold:
+            warning_message = f"🔥 Potential Exploding Gradients! Avg norm ({mean_norm:.2f}) > {exploding_threshold}"
+        elif mean_norm < vanishing_threshold and self.attempt_count > 1000: # Avoid warnings too early
+             warning_message = f"🧊 Potential Vanishing Gradients! Avg norm ({mean_norm:.4f}) < {vanishing_threshold}"
+        elif stdev_norm > (mean_norm * instability_stdev_factor) and mean_norm > 0.1: # Avoid warnings for very small stable norms
+             warning_message = f"⚡ Training Instability Detected! High gradient norm variance (Mean: {mean_norm:.2f}, Stdev: {stdev_norm:.2f})"
+
+        # Issue warning if needed and cooldown has passed
+        if warning_message:
+            current_time = time.time()
+            if current_time - self.last_instability_warning_time > self.instability_warning_cooldown:
+                 log.warning(f"TRAINING INSTABILITY WARNING: {warning_message}")
+                 self.ui_display.add_status_message(f"⚠️ {warning_message}")
+                 self.last_instability_warning_time = current_time

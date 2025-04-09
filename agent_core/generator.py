@@ -883,6 +883,9 @@ class CodeGenerator:
             generated_ids (torch.Tensor): The tensor of token IDs for the generated sequence.
             current_entropy_coef (float): The dynamically calculated entropy coefficient for this step.
             tool_feedback (ToolFeedback, optional): Structured feedback from tool execution.
+
+        Returns:
+            float: The calculated total gradient norm before clipping.
         """
         if generated_ids.numel() == 0:
             logging.warning("Learn called with empty generated_ids tensor. Skipping update.")
@@ -1063,6 +1066,8 @@ class CodeGenerator:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip_norm)
         self.optimizer.step()
         logging.debug("Optimizer step performed.")
+
+        return total_norm # Return the calculated norm
         
     def _add_to_experience_buffer(self, reward, generated_ids, tool_feedback):
         """Add successful experience to the buffer for future replay"""

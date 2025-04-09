@@ -94,3 +94,7 @@ temp/
 *.bak
 *.tmp
 memory/state.json
+
+# Deprecated files/folders
+deprecated/
+memory/fingerprints.json

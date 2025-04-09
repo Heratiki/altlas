@@ -11,6 +11,9 @@ import re
 import statistics
 import collections
 import ast
+import matplotlib.pyplot as plt
+import numpy as np
+import torch # Needed for tensor operations
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -434,7 +437,7 @@ class TrainingReportGenerator:
                 data["model"] = chosen_model
             
             logging.info(f"Sending prompt to LM Studio model {chosen_model}")
-            response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(data), timeout=15)
+            response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(data), timeout=120) # Increased timeout to 45s
             
             if response.status_code == 200:
                 response_data = response.json()
@@ -563,6 +566,10 @@ Format your response with clear section headers and bullet points where appropri
             timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
             session_id = now.strftime("%Y%m%d_%H%M%S") # Simple session ID based on time
 
+            # --- Generate Weight Histograms ---
+            # Pass the generator_state which should contain the model state dict
+            histogram_plot_paths = self._generate_weight_histograms(generator_state, session_id)
+
             # --- Calculate Metrics ---
             metrics = self._calculate_metrics(history)
             elapsed_time_sec = datetime.utcnow().timestamp() - start_time
@@ -686,7 +693,14 @@ Format your response with clear section headers and bullet points where appropri
                 'prev_entropy': f"{previous_metrics.get('entropy_coefficient', 0.0):.4f}",
                 'entropy_change': f"{entropy_change:+.4f}",
                 'stuck_events': stuck_events,
-                'beam_search_uses': beam_search_uses
+                'beam_search_uses': beam_search_uses,
+
+                # Add relative paths to histograms for embedding in the report
+                'embedding_hist_path': str(histogram_plot_paths.get('embedding.weight', DEFAULT_PLACEHOLDER)) if histogram_plot_paths else DEFAULT_PLACEHOLDER,
+                'lstm_ih_hist_path': str(histogram_plot_paths.get('lstm.weight_ih_l0', DEFAULT_PLACEHOLDER)) if histogram_plot_paths else DEFAULT_PLACEHOLDER,
+                'lstm_hh_hist_path': str(histogram_plot_paths.get('lstm.weight_hh_l0', DEFAULT_PLACEHOLDER)) if histogram_plot_paths else DEFAULT_PLACEHOLDER,
+                'fc_weight_hist_path': str(histogram_plot_paths.get('fc.weight', DEFAULT_PLACEHOLDER)) if histogram_plot_paths else DEFAULT_PLACEHOLDER,
+                'fc_bias_hist_path': str(histogram_plot_paths.get('fc.bias', DEFAULT_PLACEHOLDER)) if histogram_plot_paths else DEFAULT_PLACEHOLDER,
             }
 
             # Insert stuck/beam info into Score Progression section
@@ -747,6 +761,97 @@ Format your response with clear section headers and bullet points where appropri
             # Use logging for better error tracking
             logging.error(f"Error generating or saving training report: {e}", exc_info=True)
             return None
+
+    def _generate_weight_histograms(self, generator_state: Dict, session_id: str):
+        """Generates histograms for key model weights and saves them."""
+        try:
+            # Check if matplotlib is available
+            import matplotlib
+            matplotlib.use('Agg') # Use non-interactive backend suitable for saving files
+            import matplotlib.pyplot as plt
+        except ImportError:
+            logging.warning("matplotlib not found. Skipping weight histogram generation.")
+            return None
+
+        # --- Get Model State Dictionary ---
+        # Prioritize getting it directly from generator_state if passed
+        model_state_dict = generator_state.get('model_state_dict')
+        
+        # Fallback: Try loading from file if generator didn't pass it directly
+        if not model_state_dict:
+            model_state_path = Path(__file__).parent.parent / "memory" / "model_state.pth"
+            if model_state_path.exists():
+                 try:
+                     # Load to CPU to avoid potential CUDA issues in report generation context
+                     model_state_dict = torch.load(model_state_path, map_location='cpu')
+                     logging.info(f"Loaded model state from {model_state_path} for histograms.")
+                 except Exception as e:
+                     logging.error(f"Failed to load model state from {model_state_path} for histograms: {e}")
+                     return None # Cannot proceed without model state
+            else:
+                logging.warning("Model state dictionary not available in generator_state or file. Cannot generate weight histograms.")
+                return None
+        # --- End Get Model State Dictionary ---
+
+        histogram_paths = {}
+        # Ensure plots directory exists within the main report directory
+        plot_dir = self.report_dir / "plots" / session_id
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
+        logging.info(f"Generating weight histograms in {plot_dir}...")
+
+        # Define key layers to plot histograms for
+        key_layers = {
+            'embedding.weight': 'Embedding Weights',
+            'lstm.weight_ih_l0': 'LSTM Input Weights (Layer 0)',
+            'lstm.weight_hh_l0': 'LSTM Hidden Weights (Layer 0)',
+            'fc.weight': 'Output FC Weights',
+            'fc.bias': 'Output FC Bias'
+        }
+
+        for param_name, plot_title in key_layers.items():
+            if param_name in model_state_dict:
+                try:
+                    # Ensure data is on CPU and converted to numpy
+                    param_data = model_state_dict[param_name].cpu().numpy().flatten()
+                    
+                    plt.figure(figsize=(10, 6))
+                    plt.hist(param_data, bins=50, color='skyblue', edgecolor='black', alpha=0.7)
+                    plt.title(f'{plot_title} Distribution\n(Session: {session_id})', fontsize=14)
+                    plt.xlabel("Weight Value", fontsize=12)
+                    plt.ylabel("Frequency", fontsize=12)
+                    plt.grid(True, linestyle='--', alpha=0.6)
+                    
+                    # Add basic stats text to the plot
+                    mean_val = np.mean(param_data)
+                    std_val = np.std(param_data)
+                    min_val = np.min(param_data)
+                    max_val = np.max(param_data)
+                    stats_text = f"Mean: {mean_val:.3f}\nStd: {std_val:.3f}\nMin: {min_val:.3f}\nMax: {max_val:.3f}"
+                    # Position the text box in the upper right corner
+                    plt.text(0.95, 0.95, stats_text,
+                             transform=plt.gca().transAxes, # Use axes coordinates
+                             fontsize=10, verticalalignment='top', horizontalalignment='right',
+                             bbox=dict(boxstyle='round,pad=0.5', fc='wheat', alpha=0.5))
+
+                    # Define plot filename and save path
+                    plot_filename = f"hist_{param_name.replace('.', '_')}.png"
+                    plot_path = plot_dir / plot_filename
+                    plt.savefig(plot_path, bbox_inches='tight') # Save the figure
+                    plt.close() # Close the figure explicitly to free memory
+                    
+                    # Store relative path for linking in the Markdown report
+                    # Path should be relative to the report file itself (which is in self.report_dir)
+                    relative_plot_path = Path("plots") / session_id / plot_filename
+                    histogram_paths[param_name] = relative_plot_path
+                    logging.debug(f"Generated histogram for {param_name} at {plot_path}")
+
+                except Exception as e:
+                    logging.error(f"Failed to generate histogram for {param_name}: {e}", exc_info=True)
+            else:
+                 logging.warning(f"Parameter '{param_name}' not found in model state dict for histogram generation.")
+
+        return histogram_paths # Return dictionary of parameter names to relative plot paths
 
     def _rotate_reports(self, keep: int):
         """Keeps only the specified number of most recent timestamped reports."""

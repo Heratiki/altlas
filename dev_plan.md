@@ -62,7 +62,7 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **2.1 Implement Initialization Diagnostics**
   - [✓] Add logging of weight statistics in `model.py` (mean, std, min, max)
-  - [ ] Create weight histogram visualization function
+  - [✓] Create weight histogram visualization function (*Implemented in report generator, but removed by user*)
   - [✓] Add explicit initialization methods (Xavier/Glorot, Kaiming He, Orthogonal) in `model.py`
 
 - [✓] **2.2 Create Weight Validation Functions**
@@ -72,8 +72,8 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **2.3 Add Runtime Monitoring**
   - [✓] Track gradient statistics during learning (log gradient norm in `generator.py`)
-  - [ ] Monitor weight changes over time to detect vanishing/exploding gradients
-  - [ ] Add early warning for training instability
+  - [✓] Monitor weight changes over time to detect vanishing/exploding gradients (`TrainingLoop._monitor_training_stability`)
+  - [✓] Add early warning for training instability (`TrainingLoop._monitor_training_stability`)
 
 ### 3. Training Signal Enhancement
 
@@ -88,6 +88,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Add semantic similarity scoring based on task descriptions and code structure
   - [✓] Create modular scoring system with weighted components for different error types
   - [✓] Implement progressive scaling to break through learning plateaus
+  - *Note: Review potential redundancy between `score` and `calculate_reward` methods in `scorer.py`.*
 
 - [✓] **3.2 Adjust Learning Mechanisms in `generator.py`**
   - [✓] Add entropy regularization to encourage exploration
@@ -121,11 +122,11 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Monitor token co-occurrence patterns
   - [✓] Identify over/under-utilized tokens
   
-- [ ] **4.4 Implement Adaptive Token Imbalance Recovery**
-  - [ ] Track token imbalance warnings with cooldown logic
-  - [ ] Apply entropy boost if imbalance persists > N iterations
-  - [ ] Penalize overused tokens directly in logit sampling (softmax)
-  - [ ] Add config option: `TokenImbalancePenalty = 0.2`
+- [✓] **4.4 Implement Adaptive Token Imbalance Recovery**
+  - [✓] Track token imbalance warnings with cooldown logic (`tokenizer.py`)
+  - [✓] Apply entropy boost if imbalance persists > N iterations (*Handled via generator logic/temperature*)
+  - [✓] Penalize overused tokens directly in logit sampling (softmax) (`generator.py`)
+  - [✓] Add config option: `TokenImbalancePenalty = 0.2` (`config.ini`)
 
 
 ### 5. Fingerprinting and Duplicate Detection
@@ -220,20 +221,22 @@ Each task below should be completed while preserving existing functionality. Tas
   - [🔄] Implement pattern-based hint generation
 
 - [🔄] **9.3 Task Resource Management**
-  - [🔄] Add memory limits per task
-  - [🔄] Add CPU/time constraints per task
-  - [🔄] Implement resource monitoring and enforcement
-  - [🔄] Add task-specific timeout values
+  - [ ] Add memory limits per task (*Executor needs enhancement*)
+  - [ ] Add CPU/time constraints per task (*Executor needs enhancement*)
+  - [ ] Implement resource monitoring and enforcement (*Executor needs enhancement*)
+  - [✓] Add task-specific timeout values (*Implemented in executor via config*)
+  - *Note: Current implementation only handles basic timeout. Robust sandboxing and resource limits (CPU, memory) require significant executor enhancements (See Task 17).*
 
 ### 10. Model Architecture Improvements [NEW]
 
 **Goal**: Enhance the neural architecture to better handle code generation
 
 - [✓] **10.1 Attention Mechanisms**
-  - [✓] Add self-attention layer to better handle long-range dependencies
-  - [✓] Implement position encoding for token positions
+  - [✓] Add self-attention layer to better handle long-range dependencies (*Code exists but disabled in model.py*)
+  - [✓] Implement position encoding for token positions (*Code exists but disabled in model.py*)
   - [ ] Add cross-attention for task/hint integration
-  - [✓] Implement multi-head attention
+  - [✓] Implement multi-head attention (*Code exists but disabled in model.py*)
+  - *Note: Attention mechanism code is present in `model.py` but currently commented out/disabled.*
 
 - [✓] **10.2 Hierarchical Generation**
   - [✓] Add code structure prediction (function, class, loop, etc.) via grammar rules
@@ -259,9 +262,9 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **11.2 Enhanced Learning from Tool Results**
   - [✓] Create target embedding vectors based on tool feedback categories (Requires model changes - see Task 10)
-  - [✓] Implement differential weighting of tokens based on their likely contribution to errors (via feedback severity and type)
-  - [✓] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
-  - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type)
+  - [✓] Implement differential weighting of tokens based on their likely contribution to errors (via feedback severity and type) (`generator.learn`)
+  - [ ] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
+  - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type) (`generator._update_learning_rate`)
 
 - [✓] **11.3 Tool Feedback Exploration**
   - [✓] Implement a feedback-guided exploration strategy (adjust temperature/penalize tokens based on last feedback)
@@ -372,16 +375,17 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] `attempt_manager.py`
   - [✓] Keep `runner.py` only for `main()` orchestration
 
-- [ ] **15.3 Ensure that all current functionality remains intact**:
+- [ ] **15.3 Ensure that all current functionality remains intact**: (*Requires testing*)
   - [ ] Rich-based UI should still work identically
   - [ ] No change to CLI args (e.g. `--task`, `--reset`)
   - [ ] Model saving and reporting must still trigger appropriately
-
-- [ ] **15.4 Use dependency injection for component reuse**:
+- [ ] **15.4 Use dependency injection for component reuse**: (*Partially done, review needed*)
   - [ ] Pass logger, config path, and device context cleanly between modules
-
 - [ ] **15.5 Add backward compatibility validation test**:
   - [ ] Create test to verify all outputs and behaviors match pre-refactor state
+  - [ ] Verify that all CLI options work as before
+  - [ ] Check performance impact of modularization
+- *Note: `memory/logger.py` and `memory/fingerprints.py` confirmed obsolete; functionality merged into `core/attempt_manager.py`. Files moved to `deprecated/` directory (ignored by git).*
   - [ ] Verify that all CLI options work as before
   - [ ] Check performance impact of modularization
 
@@ -408,6 +412,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Refactor `TrainingReportGenerator._call_local_llm` to use the new vLLM provider
   - [ ] Update hint generation in `TrainingLoop._get_hint_from_advisor`
   - [ ] Create compatibility layer for existing code
+  - *Note (2025-04-09): Increased LM Studio API timeout in `TrainingReportGenerator._call_local_llm` to 120s to mitigate premature timeouts.*
 
 - [ ] **16.4 Implement Performance Monitoring**
   - [ ] Add instrumentation to track LLM request latency
@@ -422,6 +427,54 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Implement code review capabilities for generated solutions
   - [ ] Add automatic prompt tuning based on hint effectiveness
   - [ ] Create an LLM-based code analyzer for deeper report insights
+
+
+### 17. Execution Safety and Sandboxing [NEW, PLANNED]
+
+**Goal**: Enhance the safety and robustness of code execution by implementing stronger sandboxing and resource controls.
+
+- [ ] **17.1 Implement Robust Sandboxing**
+  - [ ] Explore containerization (Docker) or process isolation (nsjail) for execution.
+  - [ ] Define strict filesystem access controls (allow only necessary paths).
+  - [ ] Disable network access by default during execution.
+- [ ] **17.2 Resource Limit Enforcement**
+  - [ ] Implement memory limits per execution (complementary to Task 9.3).
+  - [ ] Implement CPU usage limits per execution (complementary to Task 9.3).
+  - [ ] Refine timeout mechanism for better reliability.
+- [ ] **17.3 Static Code Analysis Integration**
+  - [ ] Integrate tools like Bandit for pre-execution safety checks.
+  - [ ] Develop custom AST analysis rules to detect potentially harmful patterns beyond basic regex.
+- [ ] **17.4 Capability Limiting**
+  - [ ] Investigate methods to restrict access to dangerous Python modules/built-ins within the execution context.
+
+
+### 18. Parallel Training Loop Implementation [NEW, PLANNED]
+
+**Goal**: Parallelize the code generation, execution, and scoring process to significantly improve training throughput and efficiency.
+
+- [ ] **18.1 Analyze Bottlenecks**
+  - [ ] Profile current `TrainingLoop` to identify major time sinks (generation, execution, scoring, learning).
+  - [ ] Determine which components are most suitable for parallelization.
+- [ ] **18.2 Design Parallel Architecture**
+  - [ ] Explore using `multiprocessing` or `asyncio` for parallel execution of attempts.
+  - [ ] Design a worker pool system for code execution and scoring.
+  - [ ] Define mechanisms for distributing tasks (code attempts) to workers and collecting results.
+- [ ] **18.3 Refactor Core Components for Parallelism**
+  - [ ] Modify `TrainingLoop` to manage parallel workers and aggregate results.
+  - [ ] Ensure `CodeExecutor` and `AttemptScorer` are thread-safe or suitable for parallel execution (consider instance-per-worker).
+  - [ ] Adapt `CodeGenerator` if parallel generation (e.g., batching) is feasible.
+  - [ ] Modify `AttemptManager` to handle concurrent logging and state updates safely (e.g., using locks or queues).
+- [ ] **18.4 Implement State Synchronization**
+  - [ ] Develop strategies for synchronizing shared state (e.g., model weights, optimizer state, best score, attempt count) between the main process and workers.
+  - [ ] Address potential race conditions and ensure data consistency during learning updates.
+- [ ] **18.5 Configuration and Control**
+  - [ ] Add configuration options (`config.ini`) to enable/disable parallelism and control the number of workers.
+  - [ ] Ensure UI (`ui_display.py`) can handle updates from multiple sources or aggregates statistics correctly.
+- [ ] **18.6 Testing and Benchmarking**
+  - [ ] Implement tests to verify correctness under parallel execution.
+  - [ ] Benchmark performance gains and overhead of the parallel implementation.
+  - [ ] Analyze resource utilization (CPU, memory) under parallel load.
+
 
 ## Priority Order
 

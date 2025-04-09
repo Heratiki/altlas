@@ -19,6 +19,9 @@ class Tokenizer:
         Args:
             vocab_path (str): Path to the vocabulary JSON file.
         """
+        self.token_usage = {}  # Track token usage counts
+        self.last_warning_time = 0  # For cooldown tracking
+        self.warning_cooldown = 1000  # Number of tokens between warnings
         self.vocab_path = Path(__file__).parent / vocab_path
         self.token_to_id = {}
         self.id_to_token = {}
@@ -30,6 +33,8 @@ class Tokenizer:
         self._load_vocab()
         # Sort tokens by length descending to prioritize longer matches (e.g., <= before <)
         self._sorted_tokens = sorted(self.token_to_id.keys(), key=len, reverse=True)
+        # Initialize token usage counts
+        self.token_usage = {token: 0 for token in self.token_to_id}
         # Remove special tokens from sorted list used for matching code text
         self._sorted_tokens_no_special = [t for t in self._sorted_tokens if not (t.startswith('<') and t.endswith('>')) and t not in ["INDENT", "DEDENT"]]
         logging.info(f"Prepared {len(self._sorted_tokens_no_special)} non-special tokens for matching.")
@@ -70,6 +75,68 @@ class Tokenizer:
     def vocab_size(self):
         """Returns the size of the vocabulary."""
         return len(self.token_to_id)
+
+    def check_token_imbalance(self, min_usage=100):
+        """
+        Check if there is significant token imbalance in usage.
+        
+        Args:
+            min_usage (int): Minimum total token usage before checking imbalance
+            
+        Returns:
+            tuple: (bool indicating imbalance, list of overused tokens)
+        """
+        total_usage = sum(self.token_usage.values())
+        if total_usage < min_usage:
+            return False, []
+            
+        # Calculate expected usage if distribution was uniform
+        avg_usage = total_usage / len(self.token_usage)
+        threshold = avg_usage * 2  # Token is overused if >2x average
+        
+        # Find overused tokens
+        overused = [(token, count) for token, count in self.token_usage.items()
+                   if count > threshold and token not in ['<PAD>', '< SOS >', '<EOS>', '<UNK>']]
+        
+        # Check if enough time has passed since last warning
+        current_total = sum(self.token_usage.values())
+        if overused and (current_total - self.last_warning_time) >= self.warning_cooldown:
+            self.last_warning_time = current_total
+            return True, overused
+            
+        return False, []
+
+    def get_token_penalties(self, penalty_factor=0.2):
+        """
+        Calculate penalty factors for overused tokens.
+        
+        Args:
+            penalty_factor (float): Base penalty factor to apply
+            
+        Returns:
+            dict: Token ID to penalty factor mapping
+        """
+        total_usage = sum(self.token_usage.values())
+        if total_usage < 100:  # Don't apply penalties until we have enough data
+            return {}
+            
+        avg_usage = total_usage / len(self.token_usage)
+        penalties = {}
+        
+        for token, count in self.token_usage.items():
+            if count > avg_usage * 2:  # Only penalize significantly overused tokens
+                token_id = self.token_to_id[token]
+                ratio = count / avg_usage
+                # Scale penalty with overuse, max at penalty_factor
+                penalties[token_id] = min(penalty_factor * (ratio - 1) / ratio, penalty_factor)
+                
+        return penalties
+
+    def update_usage(self, token_id):
+        """Update usage count for a token."""
+        token = self.id_to_token.get(token_id)
+        if token:
+            self.token_usage[token] = self.token_usage.get(token, 0) + 1
 
     def encode(self, text: str) -> torch.Tensor:
         """
@@ -123,7 +190,9 @@ class Tokenizer:
                 # Need to handle potential regex special chars in tokens if using regex matching later
                 # For now, simple startswith check
                 if text.startswith(token, current_pos):
-                    encoded_ids.append(self.token_to_id[token])
+                    token_id = self.token_to_id[token]
+                    encoded_ids.append(token_id)
+                    self.update_usage(token_id)
                     current_pos += len(token)
                     match_found = True
                     break # Found the longest match

@@ -63,6 +63,9 @@ class CodeGenerator:
             paths_config = config['Paths']
             optimizer_config = config['Optimizer']
             model_config = config['Model'] # Added section for model params
+            
+            # Store optimizer config for token penalties
+            self.token_imbalance_penalty = optimizer_config.getfloat('TokenImbalancePenalty', 0.2)
 
             self.max_gen_length = gen_config.getint('MaxGenerationLength', 50)
 
@@ -471,6 +474,23 @@ class CodeGenerator:
                     # Apply softmax to get probabilities for sampling
                     probabilities = F.softmax(last_logits, dim=-1)
                     
+                    # Get token imbalance penalties from tokenizer
+                    token_penalties = self.tokenizer.get_token_penalties(
+                        penalty_factor=self.token_imbalance_penalty
+                    )
+                    if token_penalties:
+                        penalty_applied = False
+                        penalty_count = 0
+                        for token_id, penalty in token_penalties.items():
+                            if 0 <= token_id < probabilities.shape[0]:
+                                probabilities[token_id] *= (1.0 - penalty)
+                                penalty_count += 1
+                                penalty_applied = True
+                        # Re-normalize probabilities after applying penalties
+                        if penalty_applied:
+                            logging.debug(f"Applied imbalance penalties to {penalty_count} tokens in generate()")
+                        probabilities = probabilities / (probabilities.sum() + 1e-9)
+                    
                     # --- Apply Hint Bias ---
                     if hinted_token_ids:
                         for token_id in hinted_token_ids:
@@ -741,6 +761,23 @@ class CodeGenerator:
                             
                         # Get probabilities
                         probabilities = F.softmax(last_logits, dim=-1)
+                        
+                        # Get token imbalance penalties from tokenizer for beam search
+                        token_penalties = self.tokenizer.get_token_penalties(
+                        penalty_factor=self.token_imbalance_penalty
+                        )
+                        if token_penalties:
+                            penalty_applied = False
+                            penalty_count = 0
+                            for token_id, penalty in token_penalties.items():
+                                if 0 <= token_id < probabilities.shape[0]:
+                                    probabilities[token_id] *= (1.0 - penalty)
+                                    penalty_count += 1
+                                    penalty_applied = True
+                            # Re-normalize probabilities after applying penalties
+                            if penalty_applied:
+                                logging.debug(f"Applied imbalance penalties to {penalty_count} tokens in beam search")
+                            probabilities = probabilities / (probabilities.sum() + 1e-9)
                         
                         # Apply hint bias
                         if hinted_token_ids:

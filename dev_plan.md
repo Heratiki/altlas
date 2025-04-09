@@ -120,6 +120,13 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Track token distribution in generated code (initialized counter and counting logic in `generator.py`)
   - [✓] Monitor token co-occurrence patterns
   - [✓] Identify over/under-utilized tokens
+  
+- [ ] **4.4 Implement Adaptive Token Imbalance Recovery**
+  - [ ] Track token imbalance warnings with cooldown logic
+  - [ ] Apply entropy boost if imbalance persists > N iterations
+  - [ ] Penalize overused tokens directly in logit sampling (softmax)
+  - [ ] Add config option: `TokenImbalancePenalty = 0.2`
+
 
 ### 5. Fingerprinting and Duplicate Detection
 
@@ -378,6 +385,44 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Verify that all CLI options work as before
   - [ ] Check performance impact of modularization
 
+### 16. Refactor External LLM Integration for vLLM [PLANNED]
+
+**Goal**: Replace current OPENAI/LM Studio implementation with vLLM to improve performance, reduce costs, and optimize usage patterns across the codebase.
+
+- [ ] **16.1 Set Up vLLM Infrastructure**
+  - [ ] Create a dedicated `llm_provider` module to abstract LLM API interactions
+  - [ ] Implement vLLM server configuration with appropriate model options
+  - [ ] Add fallback mechanisms for when vLLM is unavailable
+  - [ ] Set up batching capabilities to optimize throughput
+  - [ ] Implement configuration options for vLLM-specific parameters (model path, quantization, batch size, etc.)
+
+- [ ] **16.2 Implement Request Optimization**
+  - [ ] Add request batching to combine multiple similar requests
+  - [ ] Implement caching to avoid redundant LLM calls (e.g., for similar hints)
+  - [ ] Create a prompt template system to standardize and optimize prompts
+  - [ ] Implement token counting to minimize input sizes
+  - [ ] Add asynchronous request handling to improve throughput
+
+- [ ] **16.3 Migrate Existing LLM Calls**
+  - [ ] Identify all current LLM integration points (hint generation, report analysis, etc.)
+  - [ ] Refactor `TrainingReportGenerator._call_local_llm` to use the new vLLM provider
+  - [ ] Update hint generation in `TrainingLoop._get_hint_from_advisor`
+  - [ ] Create compatibility layer for existing code
+
+- [ ] **16.4 Implement Performance Monitoring**
+  - [ ] Add instrumentation to track LLM request latency
+  - [ ] Monitor token usage and costs
+  - [ ] Implement adaptive request throttling based on system load
+  - [ ] Create detailed logging for LLM interactions
+  - [ ] Add performance metrics to training reports
+
+- [ ] **16.5 Enhance LLM-Based Features**
+  - [ ] Improve hint quality with more specialized prompts
+  - [ ] Add progressive hint generation (increasing specificity with successive failures)
+  - [ ] Implement code review capabilities for generated solutions
+  - [ ] Add automatic prompt tuning based on hint effectiveness
+  - [ ] Create an LLM-based code analyzer for deeper report insights
+
 ## Priority Order
 
 **Current Priorities:**
@@ -411,6 +456,10 @@ Each task below should be completed while preserving existing functionality. Tas
    - Implement training report generation for better tracking and analysis
    - Integrate reporting into the training loop
    - Add automatic pattern analysis and insights
+
+8. **Eighth Priority: vLLM Integration (16.1, 16.2)**
+   - Replace OPENAI/LM Studio with vLLM for better performance and control
+   - Implement request optimization to reduce costs and improve throughput
 
 ## Tracking Progress
 

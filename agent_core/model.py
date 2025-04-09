@@ -26,6 +26,7 @@ class AltLAS_RNN(nn.Module):
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
+        # Optional: Enable attention mechanism (default False for stability-first)\n        self.use_attention = True  # Set True to enable attention, or make configurable\n\n        # Positional encoding buffer (fixed sinusoidal)\n        max_seq_len = 512  # or configurable\n        pe = torch.zeros(max_seq_len, self.embedding_dim)\n        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)\n        div_term = torch.exp(torch.arange(0, self.embedding_dim, 2).float() * (-math.log(10000.0) / self.embedding_dim))\n        pe[:, 0::2] = torch.sin(position * div_term)\n        pe[:, 1::2] = torch.cos(position * div_term)\n        self.register_buffer('positional_encoding', pe.unsqueeze(0))  # shape (1, max_seq_len, embedding_dim)\n\n        # Multi-head self-attention layer (query=key=value=LSTM outputs)\n        self.attention = nn.MultiheadAttention(embed_dim=self.hidden_dim, num_heads=4, batch_first=True)\n
         self.num_layers = num_layers
 
         # Layer 1: Embedding layer
@@ -107,12 +108,14 @@ class AltLAS_RNN(nn.Module):
         # 1. Get embeddings
         # input_seq shape: (batch_size, seq_length)
         # embedded shape: (batch_size, seq_length, embedding_dim)
+        # Add positional encoding to embeddings (truncate if needed)\n        seq_len = embedded.size(1)\n        embedded = embedded + self.positional_encoding[:, :seq_len, :]\n
         embedded = self.embedding(input_seq)
 
         # 2. Pass embeddings through LSTM
         # lstm_out shape: (batch_size, seq_length, hidden_dim)
         # hidden_state tuple shapes: (num_layers, batch_size, hidden_dim)
         lstm_out, hidden_state = self.lstm(embedded, hidden_state)
+        # Optionally apply self-attention on top of LSTM outputs\n        if self.use_attention:\n            # MultiheadAttention expects (batch, seq, feature) with batch_first=True\n            attn_output, _ = self.attention(lstm_out, lstm_out, lstm_out)\n            lstm_out = attn_output\n
 
         # 3. Pass LSTM output through the final linear layer
         # output_logits shape: (batch_size, seq_length, vocab_size)

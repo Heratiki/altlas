@@ -68,8 +68,8 @@ log.setLevel(file_log_level)  # Set root logger level based on file_log_level
 # Formatter for file logs
 file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# File Handler (Rotating)
-file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')
+# File Handler (Rotating) - Reduced to 2.5MB per file as requested
+file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=1*1024*1024, backupCount=5, encoding='utf-8')
 file_handler.setFormatter(file_formatter)
 file_handler.setLevel(file_log_level)  # Set from config
 
@@ -112,8 +112,8 @@ def main():
 
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Run the AltLAS Learning Agent.")
-    parser.add_argument("--task", type=str, default="hello_world", 
-                        help="Name of the task JSON file to load (without .json extension). Defaults to hello_world.")
+    parser.add_argument("--task", type=str, default="benchmark_add_two_numbers", 
+                        help="Name of the task JSON file to load (without .json extension). Defaults to benchmark_add_two_numbers.")
     parser.add_argument("--reset", action="store_true", 
                         help="Reset all training state files and start from attempt 1.")
     args = parser.parse_args()

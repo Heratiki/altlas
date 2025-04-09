@@ -125,6 +125,17 @@ class TrainingLoop:
         self.reward_count = 0
         self.reward_mean = 0.0
         self.reward_std = 1.0 # Initialize std to 1 to avoid division by zero initially
+        
+        # Convergence tracking
+        self.unique_successful_fingerprints = set()
+        self.task_converged = False
+        # Correctly get value from dict and convert to int
+        convergence_threshold_str = self.runner_config.get('ConvergenceThreshold', '5') # Get as string with default
+        try:
+            self.convergence_threshold = int(convergence_threshold_str)
+        except ValueError:
+            log.warning(f"Invalid ConvergenceThreshold value '{convergence_threshold_str}' in config. Using default 5.")
+            self.convergence_threshold = 5
     
     def set_user_interrupted(self):
         """Set the user interrupted flag."""
@@ -161,7 +172,7 @@ class TrainingLoop:
         live = self.ui_display.start()
         try:
             with live: # Use the context manager
-                while self.attempt_count < max_attempts and not self.user_interrupted:
+                while self.attempt_count < max_attempts and not self.user_interrupted and not self.task_converged:
                     try:
                         self.attempt_count += 1
                         self.stats["Total Attempts"] = self.attempt_count
@@ -187,17 +198,28 @@ class TrainingLoop:
                             continue
                         
                         fingerprint = self.attempt_manager.get_fingerprint(code_attempt)
-                        if self.attempt_manager.is_duplicate(fingerprint):
-                            self.ui_display.add_status_message(f"⚠️ Duplicate code attempt detected (Hash: {fingerprint[:8]}...). Skipping.")
-                            log.warning(f"⚠️ Duplicate code attempt detected at attempt {self.attempt_count} (Hash: {fingerprint}). Skipping.")
-                            self.stats["Duplicate Attempts"] += 1
-                            continue
+                        is_duplicate = self.attempt_manager.is_duplicate(fingerprint)
                         
                         # --- Execute Code --- 
                         result = self.executor.execute(code_attempt)
                         
                         # --- Score Result --- 
                         score = self.scorer.score(code_attempt, result, self.current_task)
+                        
+                        # --- Handle Duplicates --- 
+                        if is_duplicate:
+                            # Allow duplicate if it's a high-scoring solution (reinforcement)
+                            if score >= success_threshold:
+                                log.info(f"✅ Duplicate high-scoring solution (Score: {score:.2f}, Hash: {fingerprint[:8]}...). Allowing for reinforcement.")
+                                self.ui_display.add_status_message(f"✅ Duplicate success (Score: {score:.2f}). Reinforcing.")
+                                # Proceed to learning step
+                            else:
+                                # Skip low-scoring duplicates as before
+                                self.ui_display.add_status_message(f"⚠️ Duplicate code attempt detected (Score: {score:.2f}, Hash: {fingerprint[:8]}...). Skipping.")
+                                log.warning(f"⚠️ Duplicate code attempt detected at attempt {self.attempt_count} (Score: {score:.2f}, Hash: {fingerprint}). Skipping.")
+                                self.stats["Duplicate Attempts"] += 1
+                                continue # Skip to next attempt
+                        # --- End Handle Duplicates ---
                         
                         # --- Update status message --- 
                         self.ui_display.add_status_message(f"📝 Attempt {self.attempt_count} scored {score:.2f}")
@@ -207,7 +229,8 @@ class TrainingLoop:
                             self.stats["Error Attempts"] += 1
                         
                         # --- Log Attempt --- 
-                        self.attempt_manager.log_attempt(self.attempt_count, code_attempt, result, score, fingerprint)
+                        tool_feedback_for_log = self.scorer.get_tool_feedback(code_attempt, result)
+                        self.attempt_manager.log_attempt(self.attempt_count, code_attempt, result, score, fingerprint, tool_feedback=tool_feedback_for_log)
                         
                         # --- Perform Learning Step --- 
                         self._perform_learning_step(score, generated_ids, code_attempt, result)
@@ -215,11 +238,25 @@ class TrainingLoop:
                         # --- Update UI --- 
                         self._update_ui_display(code_attempt)
                         
-                        # --- Check for Success --- 
-                        if score >= success_threshold and not self.success:
-                            self.success = True
-                            self.ui_display.add_status_message("🎉 Success! Continuing to run until max attempts...")
-                            log.info(f"🎉 SUCCESS! Task solved on attempt {self.attempt_count}. Will continue until max attempts.")
+                        # --- Check for Success & Convergence --- 
+                        if score >= success_threshold:
+                            if not self.success:
+                                self.success = True
+                                self.ui_display.add_status_message("🎉 Success! Continuing to run until convergence or max attempts...")
+                                log.info(f"🎉 SUCCESS! Task solved on attempt {self.attempt_count}. Will continue until convergence or max attempts.")
+                            
+                            # Track unique successful solutions
+                            if fingerprint not in self.unique_successful_fingerprints:
+                                self.unique_successful_fingerprints.add(fingerprint)
+                                log.info(f"Found new unique successful solution fingerprint: {fingerprint[:8]}... ({len(self.unique_successful_fingerprints)}/{self.convergence_threshold})")
+                                
+                                # Check if convergence threshold is met
+                                if len(self.unique_successful_fingerprints) >= self.convergence_threshold:
+                                    self.task_converged = True
+                                    log.info(f"🏁 Task converged after finding {len(self.unique_successful_fingerprints)} unique successful solutions. Stopping training.")
+                                    self.ui_display.add_status_message(f"🏁 Task converged after {self.attempt_count} attempts.")
+                                    break 
+                        # --- End Check for Success & Convergence ---
                         
                         # --- Save Run State --- 
                         self._save_current_state()
@@ -785,6 +822,7 @@ class TrainingLoop:
     def _get_hint_from_advisor(self) -> Optional[str]:
         """
         Get a hint from an external LLM advisor based on the current task and execution history.
+        Returns simple scaffolding hints rather than full sentences.
         
         Returns:
             str or None: A hint to guide the agent, or None if no hint could be generated
@@ -806,7 +844,28 @@ class TrainingLoop:
             # Get code samples from recent attempts
             code_samples = [h.get('code', '') for h in recent_history if h.get('code')]
             
-            # Construct a prompt for the LLM
+            # Extract the task type and key requirements to generate targeted hints
+            task_type = ""
+            key_requirements = []
+            
+            if hasattr(self.current_task, 'name'):
+                task_name = self.current_task.name.lower()
+                if "add" in task_name:
+                    task_type = "arithmetic"
+                elif "print" in task_name:
+                    task_type = "output"
+                elif "loop" in task_name:
+                    task_type = "iteration"
+                elif "function" in task_name:
+                    task_type = "function_definition"
+                elif "list" in task_name:
+                    task_type = "data_structure"
+                elif "string" in task_name:
+                    task_type = "string_manipulation"
+                elif "conditional" in task_name:
+                    task_type = "conditional"
+                    
+            # Construct a prompt for the LLM that requests simple scaffolding hints
             prompt = f"""You are an AI programming advisor helping a learning agent solve a coding task.
 
 TASK DESCRIPTION:
@@ -817,21 +876,44 @@ RECENT SCORES (higher is better):
 {recent_scores}
 
 RECENT ERRORS:
-{errors[:3]}  # Limiting to most recent 3 errors
+{errors[:2] if errors else 'No recent errors'}
 
 MOST RECENT CODE ATTEMPT:
 ```python
 {code_samples[-1] if code_samples else 'No attempts yet'}
 ```
 
-Based on this information, provide ONE specific, concise hint that would help the agent improve. 
-Focus on ONE problem at a time. Limit your hint to one or two sentences.
+TASK TYPE: {task_type}
+
+Provide a SIMPLE SCAFFOLDING HINT for the agent. Follow these rules:
+1. DO NOT provide complete solutions or full code
+2. Use ONLY keywords, function names, operators, or short code snippets
+3. NO SENTENCES OR EXPLANATIONS - just the hint
+4. Maximum 5-10 words total
+5. Format as keywords or simple code structure
+
+EXAMPLES OF GOOD HINTS:
+- For arithmetic: "print(num1 + num2)"
+- For loops: "for i in range(n):"
+- For functions: "def function_name(param):" 
+- For conditionals: "if condition: value"
+- For errors: "missing parenthesis" or "indent after if:"
+- For structure: "use str.split()" or "list.append()"
+
+BAD EXAMPLES (too verbose, don't do this):
+- "Try using a function to solve this problem with parameters for the input values."
+- "You should implement a loop that iterates through the elements."
+
+Provide ONLY the hint without explanation:
 """
             
             # Call the LLM API
             hint = self._call_llm_api(prompt)
             
             if hint:
+                # Post-process the hint to ensure brevity
+                # Remove any explanations, just keep code snippets or keywords
+                hint = self._post_process_hint(hint)
                 log.info(f"💡 Advisor Hint: {hint}")
                 return hint
             else:
@@ -841,8 +923,47 @@ Focus on ONE problem at a time. Limit your hint to one or two sentences.
         except Exception as e:
             log.error(f"⚠️ Error getting hint from advisor: {str(e)}")
             # Fallback to a generic hint if the API call fails
-            return "Try a different approach."
-
+            return "try print() or basic arithmetic"
+            
+    def _post_process_hint(self, hint: str) -> str:
+        """
+        Process the hint to ensure it's brief and scaffolding-oriented.
+        
+        Args:
+            hint: The raw hint from the LLM
+            
+        Returns:
+            A processed, simplified hint
+        """
+        # Remove common explanatory phrases
+        explanatory_phrases = [
+            "you should", "try to", "consider", "I suggest", "you need to", 
+            "it looks like", "make sure to", "remember to", "don't forget to",
+            "try using", "you could", "you might", "you can", "here's a hint",
+            "hint:", "suggestion:"
+        ]
+        
+        processed_hint = hint.lower()
+        for phrase in explanatory_phrases:
+            processed_hint = processed_hint.replace(phrase, "")
+            
+        # Remove excess whitespace and normalize
+        processed_hint = " ".join(processed_hint.split())
+        
+        # Truncate if still too long (aim for 10-15 words max)
+        words = processed_hint.split()
+        if len(words) > 15:
+            processed_hint = " ".join(words[:15])
+        
+        # Add code markers if it looks like a code snippet
+        code_indicators = ["def ", "for ", "if ", "print(", "return ", "while ", "class "]
+        if any(indicator in processed_hint for indicator in code_indicators):
+            if not (processed_hint.startswith("`") or processed_hint.startswith("```")):
+                # It's code but not marked as such
+                processed_hint = processed_hint.strip()
+        
+        return processed_hint
+    
     def _call_llm_api(self, prompt: str) -> Optional[str]:
         """
         Call an external LLM API to get a response.

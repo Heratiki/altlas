@@ -1,9 +1,30 @@
 {
-  "attempt_count": 5074,
+  "attempt_count": 4499,
   "task_name": "benchmark_add_two_numbers",
   "success": true,
-  "best_score": 0.11288900979325353,
-  "best_attempt": 5064,
-  "timestamp": 1744132723.8539147,
-  "updated": "2025-04-08 17:18:43"
+  "best_score": 1.0,
+  "best_attempt": 53,
+  "timestamp": 1744166820.5336642,
+  "updated": "2025-04-09 02:47:00",
+  "report_metrics": {
+    "all_time_high_score": 1.0,
+    "all_time_high_code": "print(5+3)",
+    "all_time_high_output": "8",
+    "all_time_low_score": 0.11318794716565768,
+    "all_time_low_code": "+ 3 \"result\" \"b\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" var_d \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\" \"result\"",
+    "all_time_low_output": "N/A",
+    "cumulative_error_counts": {
+      "Unknown Error": 68770
+    },
+    "historical_patterns": {
+      "successful": [],
+      "failed": []
+    },
+    "last_report_metrics": {
+      "success_rate": 0.0,
+      "moving_avg_score": 0.1402671851937386,
+      "high_score": 1.0,
+      "entropy_coefficient": 0.0
+    }
+  }
 }

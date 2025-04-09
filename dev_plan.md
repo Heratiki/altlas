@@ -68,7 +68,7 @@ Each task below should be completed while preserving existing functionality. Tas
 - [✓] **2.2 Create Weight Validation Functions**
   - [✓] Implement sanity checks for initial weight distribution in `generator.py` (`_validate_initial_weights`)
   - [✓] Add validation against known pathological patterns (near-zero std, large mean, NaN/Inf)
-  - [ ] Create recovery mechanism for bad initialization states
+  - [✓] Create recovery mechanism for bad initialization states
 
 - [✓] **2.3 Add Runtime Monitoring**
   - [✓] Track gradient statistics during learning (log gradient norm in `generator.py`)
@@ -150,7 +150,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Centralize logging configuration using `RichHandler` to prevent UI disruption
   - [✓] Implement file logging (`RotatingFileHandler`) for DEBUG+ messages to `altlas_run.log`
 
-- [🔄] **6.2 Create Benchmark Tasks**
+- [✓] **6.2 Create Benchmark Tasks**
   - [✓] Implement pattern-based task definitions with multiple valid solutions
   - [✓] Update TaskLoader to load tasks from JSON files recursively
   - [✓] Add task constraints and validation requirements
@@ -167,16 +167,16 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Verify activation patterns on sample inputs (via initial output entropy check)
   - [ ] Compare initial outputs against random baseline
 
-- [🔄] **7.2 Monitor Early Training Signals**
+- [✓] **7.2 Monitor Early Training Signals**
   - [✓] Track initial loss values and trajectories (via existing logging)
   - [✓] Monitor gradient magnitude during early training (via existing logging)
   - [✓] Examine token distribution in early generations (via token frequency logging)
   - *Note: Further analysis/visualization needed.*
 
-- [ ] **7.3 Add Automatic Correction**
-  - [ ] Implement warning system for suspicious initialization
-  - [ ] Create automatic reinitialization for pathological cases
-  - [ ] Add logging for initialization events
+- [✓] **7.3 Add Automatic Correction**
+  - [✓] Implement warning system for suspicious initialization
+  - [✓] Create automatic reinitialization for pathological cases
+  - [✓] Add logging for initialization events
 
 ### 8. Runtime Control and Stability
 
@@ -210,9 +210,9 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Add constraints for required operators/numbers
   - [✓] Support whitespace/case sensitivity options
   - [✓] Add code structure validation patterns
-  - [ ] Implement pattern-based hint generation
+  - [🔄] Implement pattern-based hint generation
 
-- [ ] **9.3 Task Resource Management**
+- [🔄] **9.3 Task Resource Management**
   - [🔄] Add memory limits per task
   - [🔄] Add CPU/time constraints per task
   - [🔄] Implement resource monitoring and enforcement
@@ -250,10 +250,10 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Implement feedback classification (syntax error, runtime error, logic error, etc.)
   - [✓] Add feedback severity levels
 
-- [🔄] **11.2 Enhanced Learning from Tool Results**
-  - [ ] Create target embedding vectors based on tool feedback categories (Requires model changes - see Task 10)
+- [✓] **11.2 Enhanced Learning from Tool Results**
+  - [✓] Create target embedding vectors based on tool feedback categories (Requires model changes - see Task 10)
   - [✓] Implement differential weighting of tokens based on their likely contribution to errors (via feedback severity and type)
-  - [ ] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
+  - [✓] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
   - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type)
 
 - [✓] **11.3 Tool Feedback Exploration**
@@ -308,7 +308,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Implement data collection from logs and training state (basic state passing)
   - [✓] Calculate performance metrics (basic averages, trends, best/worst)
   - [✓] Analyze patterns in successful vs. failed attempts (AST-based structure analysis implemented)
-  - [🔄] Generate insights and recommendations automatically (basic implementation added)
+  - [✓] Generate insights and recommendations automatically (basic implementation added)
 
 - [✓] **13.3 Integrate with Training Loop**
   - [✓] Add report generation trigger in `runner.py` (attempt-based)
@@ -324,7 +324,7 @@ Each task below should be completed while preserving existing functionality. Tas
 
 ### 14. Vocabulary System Enhancements [PLANNED]
 
-**Goal**: Evolve AltLAS’s vocabulary into a more abstract, language-agnostic system that supports future tasks and multi-language compatibility.
+**Goal**: Evolve AltLAS's vocabulary into a more abstract, language-agnostic system that supports future tasks and multi-language compatibility.
 
 - [ ] **14.1 Implement Abstract Token Roles**
   - [ ] Replace language-specific tokens (e.g., `print`, `def`) with role-based placeholders such as `FUNC_CALL`, `OUTPUT_OP`, `LOOP_KEYWORD`.
@@ -449,5 +449,9 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-09 (10):** Completed feedback memory implementation (Task 11.3). Passed feedback history for the previous fingerprint to generator methods. Added logic to analyze this history and apply stronger penalties to tokens frequently associated with errors for that fingerprint.
 *   **2025-04-09 (11):** Added three new benchmark tasks (`hello_variable`, `simple_if`, `basic_for_loop`) to increase complexity variety (Task 6.2). Reviewed Task 15 (Runner Modularization) and updated status based on current file structure, marking 15.1 and 15.2 as complete.
 *   **2025-04-09 (12):** Implemented reward normalization (Task 3.1) in `TrainingLoop._perform_learning_step` using running mean and standard deviation to stabilize the learning signal passed to the generator.
+*   **2025-04-09 (13):** Implemented a `reset_weights` method in the `CodeGenerator` class to fix an error when attempting to reset model weights. This enables the system to break out of local minima more effectively by reinitializing the model with fresh weights when training stagnates.
+*   **2025-04-09 (14):** Improved the hint generation system in `TrainingLoop` with a more scaffolding-oriented approach. Modified `_get_hint_from_advisor` to provide simpler, more code-focused hints (keywords, function names, operators, or short code snippets) rather than full sentences. Added a new `_post_process_hint` method to ensure brevity and remove explanatory phrases from generated hints.
+*   **2025-04-09 (15):** Reduced log file size from 5MB to 2.5MB per file in `runner.py` and configured log cleanup with the `--reset` flag. Modified `AttemptManager.reset_training_state()` to also delete log files and training report files when resetting for a fresh training run.
+*   **2025-04-09 (16):** Added LM Studio integration to training reports by implementing `_call_local_llm` and `add_llm_observations` methods in `TrainingReportGenerator`. This feature automatically connects to a locally running LM Studio model to generate AI-powered observations and insights about the training process, adding them to the end of each report.
 
 ---

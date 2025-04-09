@@ -115,6 +115,9 @@ class TrainingLoop:
         self.hint_just_provided = False
         self.score_before_hint = None
         self.hint_impact_history = [] # List to store (score_before, score_after) tuples
+        
+        # Feedback from last step
+        self.last_tool_feedback = None
     
     def set_user_interrupted(self):
         """Set the user interrupted flag."""
@@ -286,7 +289,8 @@ class TrainingLoop:
                     hints_provided=self.stats["Hints Provided"],
                     success_count=self.stats["Success Attempts"],
                     stuck_events=self.stuck_events,
-                    beam_search_uses=self.beam_search_uses
+                    beam_search_uses=self.beam_search_uses,
+                    hint_impact_history=self.hint_impact_history # Pass hint impact data
                 )
                 if report_path:
                     log.info(f"📊 Training report generation successful. Report saved to {report_path}")
@@ -320,24 +324,32 @@ class TrainingLoop:
 
                     if random.random() < effective_hint_probability:
                         self.stats["Hints Requested"] += 1
+                        # Store score *before* getting the hint
+                        self.score_before_hint = self.attempt_manager.get_best_score()
                         self.current_hint = self._get_hint_from_advisor()
                         if self.current_hint:
                             self.ui_display.add_status_message(f"🤔 Hint requested: {self.current_hint[:50]}...")
                             log.info(f"🤔 Hint requested (Effective Prob: {effective_hint_probability:.3f}): {self.current_hint}")
                             self.stats["Hints Provided"] += 1
                             self.hint_backoff_level = 0 # Reset backoff after successful hint
+                            self.hint_just_provided = True # Flag that a hint was just given for the next attempt
                         else:
                             self.ui_display.add_status_message("🤷 Advisor couldn't generate hint")
                             log.warning(f"🤷 Advisor couldn't generate hint (Effective Prob: {effective_hint_probability:.3f})")
                             # Don't reset backoff if advisor fails
+                            self.score_before_hint = None # Reset score_before_hint if hint generation failed
+                            self.hint_just_provided = False
                         self.consecutive_stuck_count = 0 # Reset stuck count after hint attempt (success or fail)
                     else:
                         log.info(f"🚫 Hint skipped due to backoff probability (Effective Prob: {effective_hint_probability:.3f}) despite meeting consecutive stuck threshold.")
                         self.hint_backoff_level += 1 # Increase backoff level when hint is skipped
                         self.current_hint = None
-                        # Keep consecutive_stuck_count high until hint is actually provided or progress is made
+                        self.hint_just_provided = False
+                        self.score_before_hint = None
                 else:
                     self.current_hint = None # No hint if not reached max consecutive checks
+                    self.hint_just_provided = False
+                    self.score_before_hint = None
             else:
                 # Progress detected
                 if self.consecutive_stuck_count > 0:
@@ -346,15 +358,18 @@ class TrainingLoop:
                 self.consecutive_stuck_count = 0
                 self.hint_backoff_level = 0 # Reset backoff level on progress
                 self.current_hint = None
+                self.hint_just_provided = False
+                self.score_before_hint = None
             
             # Reset check window
             self.last_best_score_at_check = current_best_score
             self.attempts_since_last_check = 0
         else:
-            # If not checking window, ensure hint is None unless carried over
-            # This prevents using an old hint if stuck condition resolved itself before max checks
+            # If not checking window, ensure hint state is reset if not actively stuck or hinting
             if self.consecutive_stuck_count == 0:
                  self.current_hint = None
+                 self.hint_just_provided = False
+                 self.score_before_hint = None
     
     def _generate_code_attempt(self) -> Tuple[Optional[str], Optional[List[int]]]:
         """Generate a code attempt using the appropriate method."""
@@ -398,7 +413,8 @@ class TrainingLoop:
                     self.current_task, 
                     self.attempt_manager.get_history(max_entries=5),  # Fewer history entries to reduce bias from old patterns
                     hint=self.current_hint, 
-                    temperature=temperature
+                    temperature=temperature,
+                    last_feedback=self.last_tool_feedback # Pass last feedback
                 )
             except Exception as reset_error:
                 log.error(f"❌ Error resetting model weights: {str(reset_error)}")
@@ -420,7 +436,8 @@ class TrainingLoop:
                 self.current_task, 
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint,
-                temperature=temperature
+                temperature=temperature,
+                last_feedback=self.last_tool_feedback # Pass last feedback
             )
             
         # Token distribution analysis to detect repetitive patterns
@@ -446,7 +463,8 @@ class TrainingLoop:
                                 self.current_task,
                                 self.attempt_manager.get_history(max_entries=5),
                                 hint=self.current_hint,
-                                temperature=temperature
+                                temperature=temperature,
+                                last_feedback=self.last_tool_feedback # Pass last feedback
                             )
         
         # Check for repetitive failures to boost exploration
@@ -477,7 +495,8 @@ class TrainingLoop:
                 self.current_task, 
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint,
-                beam_width=beam_width
+                beam_width=beam_width,
+                last_feedback=self.last_tool_feedback # Pass last feedback
             )
         else:
             # Use standard generation with dynamic temperature
@@ -499,7 +518,8 @@ class TrainingLoop:
                 self.current_task, 
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint, 
-                temperature=temperature
+                temperature=temperature,
+                last_feedback=self.last_tool_feedback # Pass last feedback
             )
     
     def _perform_learning_step(self, score: float, generated_ids: List[int], 
@@ -594,8 +614,22 @@ class TrainingLoop:
             log.info(f"Applied failure penalty of {failure_penalty:.2f} for repeated failed pattern (fingerprint: {fingerprint[:8]}...). Score reduced from {original_score:.4f} to {score:.4f}")
             self.ui_display.add_status_message(f"📉 Penalty applied for repeated failure ({failure_penalty:.2f})")
 
+        # --- Hint Impact Tracking ---
+        if self.hint_just_provided and self.score_before_hint is not None:
+            score_after_hint = score # Use the final score for this attempt
+            self.hint_impact_history.append((self.score_before_hint, score_after_hint))
+            improvement = score_after_hint - self.score_before_hint
+            log.info(f"Hint impact recorded: Score before={self.score_before_hint:.4f}, Score after={score_after_hint:.4f}, Improvement={improvement:+.4f}")
+            # Reset hint tracking state for the next potential hint
+            self.hint_just_provided = False
+            self.score_before_hint = None
+        # --- End Hint Impact Tracking ---
+
         # Pass the final score (potentially penalized) with dynamic coefficient and tool feedback to the learn method
         self.generator.learn(score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
+        
+        # Store the feedback for the next generation step
+        self.last_tool_feedback = tool_feedback
     
     def _update_ui_display(self, code_attempt: str):
         """Update the Rich UI display with the latest statistics."""
@@ -663,7 +697,8 @@ class TrainingLoop:
                    hints_provided=self.stats["Hints Provided"],
                    success_count=self.stats["Success Attempts"],
                    stuck_events=self.stuck_events,
-                   beam_search_uses=self.beam_search_uses
+                   beam_search_uses=self.beam_search_uses,
+                   hint_impact_history=self.hint_impact_history # Pass hint impact data
                )
                if report_path:
                    log.info(f"📊 Final training report saved to {report_path}")

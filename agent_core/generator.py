@@ -287,19 +287,39 @@ class CodeGenerator:
     }
 
     def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None):
-        """
-        Generates a code attempt using the RNN model by sampling token by token.
-        Also tracks token generation frequency.
-
-        Args:
-            task (Task, optional): The current task being attempted, may include max_tokens
-            history (list, optional): List of previous attempts
-            hint (str, optional): Optional hint to guide generation
-            temperature (float, optional): Controls randomness in token selection (lower=more deterministic)
-            last_feedback (ToolFeedback, optional): Feedback from the previous execution attempt.
-        """
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
+
+            # --- Feedback-Guided Exploration Adjustment ---
+            feedback_penalty_factor = 0.8 # How much to reduce probability of error-related tokens (e.g., 0.8 means 20% reduction)
+            feedback_relevant_token_ids = set()
+            adjusted_temperature = temperature # Start with base temperature
+
+            if last_feedback and hasattr(last_feedback, 'severity') and last_feedback.severity > 0.1:
+                # If last attempt had an error, slightly increase temperature for more exploration
+                adjusted_temperature = min(1.0, temperature + 0.1 * last_feedback.severity)
+                logging.info(f"Adjusting temperature based on last feedback severity ({last_feedback.severity:.2f}): {temperature:.2f} -> {adjusted_temperature:.2f}")
+                
+                # Get relevant tokens from last feedback to penalize them slightly
+                if hasattr(last_feedback, 'relevant_tokens') and last_feedback.relevant_tokens:
+                    relevant_texts = last_feedback.relevant_tokens
+                    for token_id, token_text in self.tokenizer.id_to_token.items():
+                        if token_text in relevant_texts:
+                            feedback_relevant_token_ids.add(token_id)
+                    if feedback_relevant_token_ids:
+                        logging.debug(f"Identified {len(feedback_relevant_token_ids)} tokens to penalize based on last feedback.")
+            # --- End Feedback-Guided Exploration Adjustment ---
+
+            # --- Success Token Boosting --- 
+            successful_token_ids = set()
+            success_boost_factor = 1.2 # Smaller boost than hints
+            if self.experience_buffer:
+                # Get tokens from the highest reward experience in the buffer
+                best_experience = max(self.experience_buffer, key=lambda x: x[0]) # x[0] is reward
+                if best_experience[0] > 0.7: # Only boost if reward was high
+                    successful_token_ids = set(best_experience[1].tolist()) # x[1] is generated_ids tensor
+                    logging.debug(f"Identified {len(successful_token_ids)} tokens to boost from successful experience (reward {best_experience[0]:.2f}).")
+            # --- End Success Token Boosting ---
 
             # Determine max generation length from task or config
             max_gen_length = task.max_tokens if (task and task.max_tokens is not None) else self.max_gen_length
@@ -387,9 +407,9 @@ class CodeGenerator:
                     # Squeeze removes batch and sequence dimensions (both are 1)
                     last_logits = output_logits.squeeze(0).squeeze(0)
                     
-                    # Apply temperature to logits before softmax (lower temp = more deterministic)
-                    if temperature != 1.0:
-                        last_logits = last_logits / temperature
+                    # Apply ADJUSTED temperature to logits before softmax
+                    if adjusted_temperature != 1.0:
+                        last_logits = last_logits / adjusted_temperature
 
                     # Apply softmax to get probabilities for sampling
                     probabilities = F.softmax(last_logits, dim=-1)
@@ -404,8 +424,33 @@ class CodeGenerator:
                         probabilities = probabilities / (probabilities.sum() + 1e-9)
                     # --- End Hint Bias ---
                     
+                    # --- Apply Feedback Penalty --- (Before Grammar/Top-k)
+                    if feedback_relevant_token_ids:
+                        penalty_applied_count = 0
+                        for token_id in feedback_relevant_token_ids:
+                            if 0 <= token_id < probabilities.shape[0]: # Check bounds
+                                probabilities[token_id] *= feedback_penalty_factor
+                                penalty_applied_count += 1
+                        if penalty_applied_count > 0:
+                            # Re-normalize probabilities after penalizing
+                            probabilities = probabilities / (probabilities.sum() + 1e-9)
+                            logging.debug(f"Applied penalty factor {feedback_penalty_factor} to {penalty_applied_count} tokens from last feedback.")
+                    # --- End Feedback Penalty ---
+                    
+                    # --- Apply Success Token Boost --- (After penalty, before grammar)
+                    if successful_token_ids:
+                        boost_applied_count = 0
+                        for token_id in successful_token_ids:
+                            if 0 <= token_id < probabilities.shape[0]: # Check bounds
+                                probabilities[token_id] *= success_boost_factor
+                                boost_applied_count += 1
+                        if boost_applied_count > 0:
+                            # Re-normalize probabilities after boosting
+                            probabilities = probabilities / (probabilities.sum() + 1e-9)
+                            # logging.debug(f"Applied success boost factor {success_boost_factor} to {boost_applied_count} tokens.")
+                    # --- End Success Token Boost ---
+                    
                     # --- Apply Python Grammar Rules ---
-                    # If current token has grammar rules, boost probabilities of valid next tokens
                     if current_token_str in self.PYTHON_GRAMMAR_RULES:
                         allowed_next_patterns = self.PYTHON_GRAMMAR_RULES[current_token_str]
                         grammar_boost_factor = 2.0  # How much to boost grammatically valid tokens
@@ -498,6 +543,37 @@ class CodeGenerator:
         try:
             self.model.eval()  # Set model to evaluation mode
             
+            # --- Feedback-Guided Exploration Adjustment ---
+            feedback_penalty_factor = 0.8 # How much to reduce probability of error-related tokens
+            feedback_relevant_token_ids = set()
+            adjusted_temperature = temperature # Start with base temperature
+
+            if last_feedback and hasattr(last_feedback, 'severity') and last_feedback.severity > 0.1:
+                # If last attempt had an error, slightly increase temperature for more exploration
+                adjusted_temperature = min(1.0, temperature + 0.1 * last_feedback.severity)
+                logging.info(f"Adjusting beam search temperature based on last feedback severity ({last_feedback.severity:.2f}): {temperature:.2f} -> {adjusted_temperature:.2f}")
+                
+                # Get relevant tokens from last feedback to penalize them slightly
+                if hasattr(last_feedback, 'relevant_tokens') and last_feedback.relevant_tokens:
+                    relevant_texts = last_feedback.relevant_tokens
+                    for token_id, token_text in self.tokenizer.id_to_token.items():
+                        if token_text in relevant_texts:
+                            feedback_relevant_token_ids.add(token_id)
+                    if feedback_relevant_token_ids:
+                        logging.debug(f"Identified {len(feedback_relevant_token_ids)} tokens to penalize in beam search based on last feedback.")
+            # --- End Feedback-Guided Exploration Adjustment ---
+            
+            # --- Success Token Boosting --- 
+            successful_token_ids = set()
+            success_boost_factor = 1.2 # Smaller boost than hints
+            if self.experience_buffer:
+                # Get tokens from the highest reward experience in the buffer
+                best_experience = max(self.experience_buffer, key=lambda x: x[0]) # x[0] is reward
+                if best_experience[0] > 0.7: # Only boost if reward was high
+                    successful_token_ids = set(best_experience[1].tolist()) # x[1] is generated_ids tensor
+                    logging.debug(f"Beam Search: Identified {len(successful_token_ids)} tokens to boost from successful experience (reward {best_experience[0]:.2f}).")
+            # --- End Success Token Boosting ---
+            
             # Determine max generation length from task or config
             max_gen_length = task.max_tokens if (task and task.max_tokens is not None) else self.max_gen_length
             
@@ -566,9 +642,9 @@ class CodeGenerator:
                         # Get logits for next token prediction
                         last_logits = output_logits.squeeze(0).squeeze(0)
                         
-                        # Apply temperature
-                        if temperature != 1.0:
-                            last_logits = last_logits / temperature
+                        # Apply ADJUSTED temperature
+                        if adjusted_temperature != 1.0:
+                            last_logits = last_logits / adjusted_temperature
                             
                         # Get probabilities
                         probabilities = F.softmax(last_logits, dim=-1)
@@ -579,6 +655,32 @@ class CodeGenerator:
                                 if 0 <= token_id < probabilities.shape[0]:
                                     probabilities[token_id] *= hint_boost_factor
                             probabilities = probabilities / (probabilities.sum() + 1e-9)
+                        
+                        # --- Apply Feedback Penalty --- (Before Grammar)
+                        if feedback_relevant_token_ids:
+                            penalty_applied_count = 0
+                            for token_id in feedback_relevant_token_ids:
+                                if 0 <= token_id < probabilities.shape[0]: # Check bounds
+                                    probabilities[token_id] *= feedback_penalty_factor
+                                    penalty_applied_count += 1
+                            if penalty_applied_count > 0:
+                                # Re-normalize probabilities after penalizing
+                                probabilities = probabilities / (probabilities.sum() + 1e-9)
+                                logging.debug(f"Beam Step: Applied penalty factor {feedback_penalty_factor} to {penalty_applied_count} tokens from last feedback.")
+                        # --- End Feedback Penalty ---
+                        
+                        # --- Apply Success Token Boost --- (After penalty, before grammar)
+                        if successful_token_ids:
+                            boost_applied_count = 0
+                            for token_id in successful_token_ids:
+                                if 0 <= token_id < probabilities.shape[0]: # Check bounds
+                                    probabilities[token_id] *= success_boost_factor
+                                    boost_applied_count += 1
+                            if boost_applied_count > 0:
+                                # Re-normalize probabilities after boosting
+                                probabilities = probabilities / (probabilities.sum() + 1e-9)
+                                # logging.debug(f"Beam Step: Applied success boost factor {success_boost_factor} to {boost_applied_count} tokens.")
+                        # --- End Success Token Boost ---
                         
                         # Apply grammar rules
                         current_token_str = self.tokenizer.id_to_token.get(token_ids[-1], "<UNK>")

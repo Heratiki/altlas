@@ -256,8 +256,8 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
   - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type)
 
-- [ ] **11.3 Tool Feedback Exploration**
-  - [ ] Implement a feedback-guided exploration strategy
+- [🔄] **11.3 Tool Feedback Exploration**
+  - [✓] Implement a feedback-guided exploration strategy (adjust temperature/penalize tokens based on last feedback)
   - [ ] Add intentional variation in code patterns that previously received positive feedback
   - [ ] Create a "feedback memory" to track which patterns cause which types of tool responses
   - [ ] Implement a curriculum that introduces more complex tool interactions gradually
@@ -445,5 +445,6 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-09 (4):** Implemented hint impact tracking (Task 1.3). Added logic to `TrainingLoop` to record the score before a hint is provided and the score on the subsequent attempt. Passed this history to `TrainingReportGenerator` and added the average hint improvement metric to the report template (`training_report.md`).
 *   **2025-04-09 (5):** Reviewed Task 11.1 (Structured Tool Feedback). The existing `ToolFeedback` class in `reinforcer/tool_feedback.py` already implements the core requirements, including classification, severity, and relevant token identification. Marked Task 11.1 as complete.
 *   **2025-04-09 (6):** Implemented parts of Task 11.2 (Enhanced Learning from Tool Results): Added differential token weighting in `generator.learn` based on feedback severity and type. Modified `generator._update_learning_rate` to adjust LR reduction based on error severity/type. Noted that implementing target embeddings and execution trace analysis requires more significant architectural changes.
+*   **2025-04-09 (7):** Implemented feedback-guided exploration (Task 11.3). Stored last step's feedback in `TrainingLoop`. Modified `generator.generate` and `generator.generate_with_beam_search` to accept `last_feedback` and use it to adjust temperature and penalize problematic tokens.
 
 ---

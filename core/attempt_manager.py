@@ -477,6 +477,38 @@ class AttemptManager:
                     deleted_count += 1
                 except Exception as e:
                     log.error(f"⚠️ Failed to delete log file {file}: {e}")
+                    
+        # Delete log files in the project root
+        log_files_pattern = self.project_root / "altlas_run.log*"
+        for log_file in self.project_root.glob("altlas_run.log*"):
+            try:
+                os.remove(log_file)
+                log.info(f"✅ Deleted log file: {log_file}")
+                deleted_count += 1
+            except Exception as e:
+                log.error(f"⚠️ Failed to delete log file {log_file}: {e}")
+                
+        # Delete training report files
+        reports_dir = self.project_root / "memory" / "reports"
+        if reports_dir.exists():
+            # Delete training reports but keep the directory structure
+            for report_file in reports_dir.glob("training_report_*.md"):
+                try:
+                    os.remove(report_file)
+                    log.info(f"✅ Deleted training report: {report_file}")
+                    deleted_count += 1
+                except Exception as e:
+                    log.error(f"⚠️ Failed to delete training report {report_file}: {e}")
+                    
+            # Also delete the latest_report.md file if it exists
+            latest_report = reports_dir / "latest_report.md"
+            if latest_report.exists():
+                try:
+                    os.remove(latest_report)
+                    log.info(f"✅ Deleted latest report: {latest_report}")
+                    deleted_count += 1
+                except Exception as e:
+                    log.error(f"⚠️ Failed to delete latest report {latest_report}: {e}")
         
         # Reset instance variables
         self.attempts = []

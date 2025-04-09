@@ -82,6 +82,7 @@ Last updated: {TIMESTAMP}
 - **Semantic Drift**: {SEMANTIC_DRIFT_STATUS} <!-- e.g., "None detected", "Moderate drift from original task objective" -->
 - **Token Distribution**: {TOKEN_DISTRIBUTION_STATUS} <!-- e.g., "Healthy", "Skewed towards basic syntax tokens" -->
 - **Hint Usage**: {HINT_USAGE} hints provided (utilized in {HINT_UTILIZATION}% of subsequent attempts)
+- **Average Hint Improvement**: {AVG_HINT_IMPROVEMENT} <!-- Average score change in the attempt immediately following a hint -->
 
 ### Score Component Breakdown
 

@@ -12,7 +12,7 @@ import statistics
 import collections
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # Default values for placeholders if data is missing
 DEFAULT_PLACEHOLDER = "N/A"
@@ -347,7 +347,8 @@ class TrainingReportGenerator:
                                  hints_provided: int,
                                  success_count: int,
                                  stuck_events: int = 0,
-                                 beam_search_uses: int = 0):
+                                 beam_search_uses: int = 0,
+                                 hint_impact_history: List[Tuple[float, float]] = None):
         """
         Generates a training report based on the current state and saves it.
 
@@ -363,6 +364,8 @@ class TrainingReportGenerator:
             success_count (int): Number of successful attempts.
             stuck_events (int): Number of stuck events detected during the run.
             beam_search_uses (int): Number of times beam search was used during the run.
+            hint_impact_history (List[Tuple[float, float]], optional): 
+                List of (score_before_hint, score_after_hint) tuples.
         """
         try:
             # Initialize status messages list
@@ -382,6 +385,20 @@ class TrainingReportGenerator:
             token_freq = generator_state.get('token_frequency', {})
             top_tokens = sorted(token_freq.items(), key=lambda item: item[1], reverse=True)[:5]
             token_distribution_status = f"Top 5: {', '.join([f'{t[0]}({t[1]})' for t in top_tokens])}" if top_tokens else "No data"
+
+            # --- Calculate Hint Impact --- 
+            avg_hint_improvement = DEFAULT_PLACEHOLDER
+            if hint_impact_history:
+                improvements = [after - before for before, after in hint_impact_history]
+                if improvements:
+                    avg_improvement = statistics.mean(improvements)
+                    avg_hint_improvement = f"{avg_improvement:+.4f}"
+                    logging.info(f"Calculated average hint impact: {avg_hint_improvement} over {len(improvements)} hints.")
+                else:
+                    logging.info("Hint impact history present but no improvements recorded yet.")
+            else:
+                hint_impact_history = [] # Ensure it's a list for calculations
+                logging.debug("No hint impact history provided for report.")
 
             # --- Generate Insights ---
             generated_insights = self._generate_insights(metrics, history, hints_provided)
@@ -451,6 +468,7 @@ class TrainingReportGenerator:
                 'token_distribution_status': token_distribution_status,
                 'hint_usage': hints_provided,
                 'hint_utilization': DEFAULT_PLACEHOLDER,
+                'avg_hint_improvement': avg_hint_improvement,
 
                 # Score Component Weights and Values
                 'syntax_weight': scorer_state.get('component_weights', {}).get('syntax', DEFAULT_PLACEHOLDER),

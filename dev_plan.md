@@ -52,8 +52,9 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **1.3 Create Hint Analytics**
   - [✓] Track and log when hints are requested and provided (via counters)
-  - [ ] Measure impact of hints on score improvement
+  - [✓] Measure impact of hints on score improvement (track score before/after hint)
   - [✓] Add hint usage statistics to the Rich UI
+  - [✓] Add average hint improvement to training report
 
 ### 2. Model Initialization and Weight Validation
 
@@ -243,17 +244,17 @@ Each task below should be completed while preserving existing functionality. Tas
 
 **Goal**: Formalize the tool-based feedback mechanism and enhance learning from execution results
 
-- [ ] **11.1 Structured Tool Feedback**
-  - [ ] Create a standardized `ToolFeedback` class to encapsulate tool outputs
-  - [ ] Extract detailed feedback features from execution results (error types, syntax issues, runtime behavior)
-  - [ ] Implement feedback classification (syntax error, runtime error, logic error, etc.)
-  - [ ] Add feedback severity levels
+- [✓] **11.1 Structured Tool Feedback**
+  - [✓] Create a standardized `ToolFeedback` class to encapsulate tool outputs
+  - [✓] Extract detailed feedback features from execution results (error types, syntax issues, runtime behavior)
+  - [✓] Implement feedback classification (syntax error, runtime error, logic error, etc.)
+  - [✓] Add feedback severity levels
 
-- [ ] **11.2 Enhanced Learning from Tool Results**
-  - [ ] Create target embedding vectors based on tool feedback categories
-  - [ ] Implement differential weighting of tokens based on their likely contribution to errors
-  - [ ] Add execution trace analysis to pinpoint error-causing tokens
-  - [ ] Implement error-type specific learning rates
+- [🔄] **11.2 Enhanced Learning from Tool Results**
+  - [ ] Create target embedding vectors based on tool feedback categories (Requires model changes - see Task 10)
+  - [✓] Implement differential weighting of tokens based on their likely contribution to errors (via feedback severity and type)
+  - [ ] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
+  - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type)
 
 - [ ] **11.3 Tool Feedback Exploration**
   - [ ] Implement a feedback-guided exploration strategy
@@ -441,5 +442,8 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
     - Fixed indentation error in `AttemptManager.log_attempt`.
 *   **2025-04-09 (2):** Completed Task 5.2 by implementing memory of failed approaches (using `failed_fingerprints` in `AttemptManager`) and adding an exploration boost (increased temperature) in `TrainingLoop._generate_code_attempt` when recent attempts consist mostly of known failed patterns.
 *   **2025-04-09 (3):** Implemented exponential backoff for hint frequency in `TrainingLoop._update_stuck_status` (Task 1.2). The hint probability now decreases by half each time a hint is skipped due to the probability check, making hints progressively rarer if they are not leading to improvements.
+*   **2025-04-09 (4):** Implemented hint impact tracking (Task 1.3). Added logic to `TrainingLoop` to record the score before a hint is provided and the score on the subsequent attempt. Passed this history to `TrainingReportGenerator` and added the average hint improvement metric to the report template (`training_report.md`).
+*   **2025-04-09 (5):** Reviewed Task 11.1 (Structured Tool Feedback). The existing `ToolFeedback` class in `reinforcer/tool_feedback.py` already implements the core requirements, including classification, severity, and relevant token identification. Marked Task 11.1 as complete.
+*   **2025-04-09 (6):** Implemented parts of Task 11.2 (Enhanced Learning from Tool Results): Added differential token weighting in `generator.learn` based on feedback severity and type. Modified `generator._update_learning_rate` to adjust LR reduction based on error severity/type. Noted that implementing target embeddings and execution trace analysis requires more significant architectural changes.
 
 ---

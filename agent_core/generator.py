@@ -659,8 +659,8 @@ class CodeGenerator:
             # Reduce reward further for syntax errors to strongly discourage them
             reward = reward * 0.5
             
-        # Update dynamic learning rate based on reward progress
-        self._update_learning_rate(reward)
+        # Update dynamic learning rate based on reward progress AND tool feedback
+        self._update_learning_rate(reward, tool_feedback)
         
         # Add experience to replay buffer if above threshold 
         if reward >= 0.5:
@@ -705,7 +705,30 @@ class CodeGenerator:
         log_probabilities = F.log_softmax(logits, dim=-1)
 
         # Select the log probabilities corresponding to the actual generated tokens
-        log_prob_actions = log_probabilities[range(generated_ids.shape[0]), generated_ids]
+        # Ensure generated_ids is 1D for indexing
+        if generated_ids.dim() > 1:
+            generated_ids_flat = generated_ids.squeeze()
+        else:
+            generated_ids_flat = generated_ids
+            
+        # Check if generated_ids_flat is empty after potential squeeze
+        if generated_ids_flat.numel() == 0:
+            logging.warning("Learn called with empty sequence after processing. Skipping update.")
+            return
+            
+        # Ensure indices are within bounds
+        if generated_ids_flat.max() >= log_probabilities.shape[1] or generated_ids_flat.min() < 0:
+            logging.error(f"Token index out of bounds. Max index: {generated_ids_flat.max()}, Vocab size: {log_probabilities.shape[1]}")
+            # Handle error appropriately, e.g., skip update or clamp indices
+            return # Skip update for now
+            
+        # Ensure log_probabilities has the correct shape (seq_len, vocab_size)
+        if log_probabilities.shape[0] != generated_ids_flat.shape[0]:
+             logging.error(f"Shape mismatch: log_probabilities ({log_probabilities.shape[0]}) vs generated_ids ({generated_ids_flat.shape[0]})")
+             # This might indicate an issue with input_seq generation or model output
+             return # Skip update
+
+        log_prob_actions = log_probabilities[range(generated_ids_flat.shape[0]), generated_ids_flat]
         # --- End Recalculation ---
 
         # --- Calculate Advantage and Update Baseline ---
@@ -714,57 +737,56 @@ class CodeGenerator:
         self.baseline = self.baseline_ema_alpha * float(reward) + (1 - self.baseline_ema_alpha) * self.baseline
         logging.debug(f"  Reward: {reward:.4f}, Baseline: {self.baseline:.4f}, Advantage: {advantage:.4f}")
 
-        # --- Calculate Token-wise Advantage Adjustments using Tool Feedback ---
-        token_wise_advantage = advantage
-        token_adjustments = None
+        # --- Calculate Token-wise Weights using Tool Feedback ---
+        token_weights = torch.ones_like(log_prob_actions) # Start with weight 1.0 for all tokens
         
-        if tool_feedback is not None:
-            # Get decoded tokens from the generated sequence
-            generated_tokens = []
-            for token_id in generated_ids:
-                token_text = self.tokenizer.id_to_token.get(token_id.item(), "<UNK>")
-                generated_tokens.append(token_text)
+        if tool_feedback is not None and hasattr(tool_feedback, 'relevant_tokens') and tool_feedback.relevant_tokens:
+            if tool_feedback.severity > 0.1: # Only apply significant weighting for actual errors
+                relevant_token_texts = tool_feedback.relevant_tokens # This is a set of strings
                 
-            # Apply token-specific adjustments based on tool feedback
-            if hasattr(tool_feedback, 'get_penalty_factors') and callable(tool_feedback.get_penalty_factors):
-                token_penalties = tool_feedback.get_penalty_factors()
+                # Decode generated IDs to strings
+                generated_tokens_text = [self.tokenizer.id_to_token.get(tid.item(), "<UNK>") for tid in generated_ids_flat]
                 
-                # If we have penalty information
-                if token_penalties:
-                    token_adjustments = [1.0] * len(generated_tokens)  # Default to no adjustment
-                    
-                    # Identify tokens that match or are parts of penalized phrases
-                    for i, token in enumerate(generated_tokens):
-                        for penalized_phrase, penalty_factor in token_penalties.items():
-                            if token in penalized_phrase or penalized_phrase in token:
-                                # Reduce advantage for this token by the penalty factor
-                                token_adjustments[i] = max(0.1, 1.0 - penalty_factor)  # Ensure it's not zero or negative
-                                logging.debug(f"  Token '{token}' adjusted by factor {token_adjustments[i]:.2f} (matched penalized phrase '{penalized_phrase}')")
-                    
-                    # Log penalty information
-                    logging.debug(f"  Applied token-specific penalties from tool feedback: {tool_feedback.feedback_type}")
-        
-        # --- End Token-wise Advantage Adjustments ---
+                adjustment_applied = False
+                for i, token_text in enumerate(generated_tokens_text):
+                    # Check if this token is considered relevant to the error
+                    is_relevant = False
+                    if token_text in relevant_token_texts:
+                        is_relevant = True
+                    else:
+                        # Check if token is part of a relevant multi-token phrase (e.g., variable name)
+                        for relevant in relevant_token_texts:
+                            if token_text in relevant or relevant in token_text:
+                                is_relevant = True
+                                break
+                                
+                    if is_relevant:
+                        # Amplify the weight based on severity, especially for negative advantage
+                        weight_increase = tool_feedback.severity
+                        if advantage < 0:
+                            # Make penalty stronger for relevant tokens if advantage is negative
+                            token_weights[i] = 1.0 + weight_increase * 1.5 # Stronger amplification for penalties
+                        else:
+                            # Slightly increase weight even for positive advantage if token caused error
+                            token_weights[i] = 1.0 + weight_increase * 0.5 # Weaker amplification for rewards
+                        adjustment_applied = True
+                        logging.debug(f"  Adjusting weight for token '{token_text}' at index {i} to {token_weights[i]:.2f} (Severity: {tool_feedback.severity:.2f}, Advantage: {advantage:.2f})")
+                
+                if adjustment_applied:
+                    logging.info(f"Applied differential token weighting based on tool feedback ({tool_feedback.feedback_type})")
+        # --- End Token-wise Weights Calculation ---
 
         # --- Calculate Loss ---
-        # 1. Policy Gradient Loss (REINFORCE with baseline)
-        # CORRECTED IMPLEMENTATION: Scale the sum of log probabilities by the advantage
-        if token_adjustments:
-            # Apply token-specific advantage adjustments
-            adjusted_advantages = [advantage * adj for adj in token_adjustments]
-            # Convert the list comprehension to a tensor before applying torch.sum()
-            policy_loss = torch.sum(torch.stack([-log_prob * adv for log_prob, adv in zip(log_prob_actions, adjusted_advantages)]))
-            logging.debug(f"  Using token-wise advantage adjustments from tool feedback")
-        else:
-            # Standard REINFORCE: Scale the entire sequence by the advantage
-            policy_loss = -torch.sum(log_prob_actions) * advantage
+        # 1. Policy Gradient Loss (REINFORCE with baseline and differential weighting)
+        # Apply token-specific weights to the advantage for each token
+        weighted_advantage = advantage * token_weights
+        policy_loss = -torch.sum(log_prob_actions * weighted_advantage)
         
         # 2. Entropy Bonus Calculation
         entropy = -torch.sum(probabilities * torch.log(probabilities + 1e-9), dim=-1)
         entropy_bonus = -torch.sum(entropy) # Sum entropy over the sequence
         
         # 3. Total Loss
-        # Minimize policy loss and negative entropy bonus (using dynamic coefficient)
         loss = policy_loss + current_entropy_coef * entropy_bonus
         loss = loss.to(self.device)
         # --- End Calculate Loss ---
@@ -794,16 +816,6 @@ class CodeGenerator:
         # Apply gradient clipping if norm > 0
         if self.gradient_clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip_norm)
-            # Optionally log norm after clipping
-            # total_norm_after_clip = 0
-            # for p in self.model.parameters():
-            #     if p.grad is not None:
-            #         param_norm = p.grad.data.norm(2)
-            #         total_norm_after_clip += param_norm.item() ** 2
-            # total_norm_after_clip = total_norm_after_clip ** 0.5
-            # logging.info(f"  Gradient Norm (After Clip): {total_norm_after_clip:.4f}")
-        # --- End Gradient Monitoring & Clipping ---
-        
         self.optimizer.step()
         logging.debug("Optimizer step performed.")
         
@@ -829,8 +841,8 @@ class CodeGenerator:
         probs = [r/total for r in rewards]
         return random.choices(self.experience_buffer, weights=probs, k=1)[0]
         
-    def _update_learning_rate(self, reward):
-        """Dynamically adjust learning rate based on reward progress"""
+    def _update_learning_rate(self, reward, tool_feedback=None):
+        """Dynamically adjust learning rate based on reward progress and tool feedback."""
         if not self.enable_dynamic_lr:
             return
             
@@ -838,21 +850,49 @@ class CodeGenerator:
         if reward > self.best_reward:
             self.best_reward = reward
             self.no_improvement_count = 0
+            # Optional: Slightly increase LR on significant improvement?
+            # new_lr = min(self.learning_rate, self.current_lr * 1.05)
+            # ... update logic ...
         else:
             self.no_improvement_count += 1
             
         # Reduce learning rate if stuck at plateau for a while
-        if self.no_improvement_count >= self.lr_patience and reward >= 0.5:
-            new_lr = max(self.min_learning_rate, self.current_lr * 0.8)
+        # Modify the condition to be less aggressive if the error was minor
+        severity_factor = 1.0
+        is_severe_error = False
+        if tool_feedback and hasattr(tool_feedback, 'severity'):
+            # Reduce impact of patience counter for less severe errors
+            severity_factor = tool_feedback.severity 
+            if tool_feedback.feedback_type in ['syntax_error', 'execution_timeout', 'import_error']:
+                is_severe_error = True
+
+        # Effective patience: higher patience for less severe errors
+        # Example: severity 0.3 -> effective_patience = 50 / (0.3 + 0.1) = 125
+        # Example: severity 0.9 -> effective_patience = 50 / (0.9 + 0.1) = 50
+        effective_patience = self.lr_patience / max(0.1, severity_factor + 0.1) 
+        
+        # Only reduce LR if score is somewhat reasonable (avoid early collapse)
+        # OR if the error is very severe (like syntax error)
+        should_consider_reduction = (reward >= 0.3) or is_severe_error
+
+        if self.no_improvement_count >= effective_patience and should_consider_reduction:
+            # Make reduction factor dependent on severity - reduce less for minor errors
+            reduction_factor = 0.8 * (severity_factor * 0.5 + 0.5) # Scale between 0.4 (severity 0) and 0.8 (severity 1)
+            new_lr = max(self.min_learning_rate, self.current_lr * reduction_factor)
             
             # Only update if the change is significant
             if new_lr < self.current_lr * 0.95:
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = new_lr
                     
-                logging.info(f"Reducing learning rate: {self.current_lr:.6f} -> {new_lr:.6f} (no improvement for {self.no_improvement_count} steps)")
+                logging.info(f"Reducing learning rate: {self.current_lr:.6f} -> {new_lr:.6f} (no improvement for {self.no_improvement_count} steps, effective patience {effective_patience:.0f}, severity {severity_factor:.2f})")
                 self.current_lr = new_lr
                 self.no_improvement_count = 0  # Reset counter after adjustment
+            else:
+                 # Log even if change wasn't applied due to minimum LR or small diff
+                 logging.debug(f"LR reduction condition met, but new LR {new_lr:.6f} not applied (current: {self.current_lr:.6f})")
+                 # Still reset counter to avoid rapid successive reduction checks
+                 self.no_improvement_count = 0
 
     def generate_template_for_benchmark(self, task):
         """

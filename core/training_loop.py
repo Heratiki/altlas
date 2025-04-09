@@ -375,6 +375,19 @@ class TrainingLoop:
         """Generate a code attempt using the appropriate method."""
         current_best_score = self.attempt_manager.get_best_score()
         
+        # --- Get Feedback History for Previous Fingerprint --- 
+        feedback_history_for_fp = None
+        if self.attempt_count > 1 and self.attempt_manager.attempts:
+            last_attempt = self.attempt_manager.attempts[-1]
+            last_fingerprint = last_attempt.get('fingerprint')
+            last_score = last_attempt.get('score', 1.0)
+            # Only use feedback memory if the last attempt failed and had a fingerprint
+            if last_fingerprint and last_score < 0.9:
+                feedback_history_for_fp = self.attempt_manager.feedback_memory.get(last_fingerprint)
+                if feedback_history_for_fp:
+                    log.debug(f"Retrieved feedback history ({len(feedback_history_for_fp)} entries) for previous fingerprint {last_fingerprint[:8]}...")
+        # --- End Get Feedback History ---
+        
         # Check if we've made progress since the last time we checked
         if current_best_score > self.last_best_score_at_check + 0.01:
             # Progress has been made
@@ -414,7 +427,8 @@ class TrainingLoop:
                     self.attempt_manager.get_history(max_entries=5),  # Fewer history entries to reduce bias from old patterns
                     hint=self.current_hint, 
                     temperature=temperature,
-                    last_feedback=self.last_tool_feedback # Pass last feedback
+                    last_feedback=self.last_tool_feedback, 
+                    feedback_history_for_fp=feedback_history_for_fp # Pass feedback history
                 )
             except Exception as reset_error:
                 log.error(f"❌ Error resetting model weights: {str(reset_error)}")
@@ -437,7 +451,8 @@ class TrainingLoop:
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint,
                 temperature=temperature,
-                last_feedback=self.last_tool_feedback # Pass last feedback
+                last_feedback=self.last_tool_feedback, 
+                feedback_history_for_fp=feedback_history_for_fp # Pass feedback history
             )
             
         # Token distribution analysis to detect repetitive patterns
@@ -464,7 +479,8 @@ class TrainingLoop:
                                 self.attempt_manager.get_history(max_entries=5),
                                 hint=self.current_hint,
                                 temperature=temperature,
-                                last_feedback=self.last_tool_feedback # Pass last feedback
+                                last_feedback=self.last_tool_feedback, 
+                                feedback_history_for_fp=feedback_history_for_fp # Pass feedback history
                             )
         
         # Check for repetitive failures to boost exploration
@@ -496,7 +512,8 @@ class TrainingLoop:
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint,
                 beam_width=beam_width,
-                last_feedback=self.last_tool_feedback # Pass last feedback
+                last_feedback=self.last_tool_feedback, 
+                feedback_history_for_fp=feedback_history_for_fp # Pass feedback history
             )
         else:
             # Use standard generation with dynamic temperature
@@ -519,7 +536,8 @@ class TrainingLoop:
                 self.attempt_manager.get_history(max_entries=10),
                 hint=self.current_hint, 
                 temperature=temperature,
-                last_feedback=self.last_tool_feedback # Pass last feedback
+                last_feedback=self.last_tool_feedback, 
+                feedback_history_for_fp=feedback_history_for_fp # Pass feedback history
             )
     
     def _perform_learning_step(self, score: float, generated_ids: List[int], 

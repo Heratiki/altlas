@@ -40,6 +40,7 @@ class AttemptManager:
         self.fingerprint_file = self.project_root / "memory" / "fingerprints.json"
         self.best_attempt_file = self.project_root / "memory" / "logs" / "best_attempt.json"
         self.attempt_history_file = self.project_root / "memory" / "logs" / "attempt_history.json"
+        self.feedback_memory_file = self.project_root / "memory" / "feedback_memory.json" # New file for feedback memory
         
         # Ensure directories exist
         self._ensure_dirs_exist()
@@ -49,6 +50,7 @@ class AttemptManager:
         self.fingerprints = self._load_fingerprints()
         self._load_attempts()
         self.failed_fingerprints = {} # Initialize failed fingerprints tracker
+        self.feedback_memory = self._load_feedback_memory() # Load feedback memory
     
     def _ensure_dirs_exist(self):
         """Ensure that all necessary directories exist."""
@@ -104,6 +106,39 @@ class AttemptManager:
         except Exception as e:
             log.error(f"Error saving attempt history: {e}")
     
+    def _load_feedback_memory(self) -> Dict[str, List[Dict]]:
+        """Load the feedback memory from file."""
+        if not self.feedback_memory_file.exists():
+            return {}
+        try:
+            with open(self.feedback_memory_file, 'r') as f:
+                # Limit the size of loaded history per fingerprint to avoid memory issues
+                loaded_memory = json.load(f)
+                # Keep only the last N feedback entries per fingerprint
+                max_feedback_history = 5 
+                for fp in loaded_memory:
+                    loaded_memory[fp] = loaded_memory[fp][-max_feedback_history:]
+                log.info(f"Loaded feedback memory for {len(loaded_memory)} fingerprints.")
+                return loaded_memory
+        except Exception as e:
+            log.error(f"Error loading feedback memory: {e}")
+            return {}
+
+    def _save_feedback_memory(self):
+        """Save the feedback memory to file."""
+        try:
+            # Limit history size before saving
+            max_feedback_history = 5
+            memory_to_save = {}
+            for fp, history in self.feedback_memory.items():
+                 memory_to_save[fp] = history[-max_feedback_history:]
+                 
+            with open(self.feedback_memory_file, 'w') as f:
+                json.dump(memory_to_save, f) # Save without indentation for space
+            log.debug("Feedback memory saved.")
+        except Exception as e:
+            log.error(f"Error saving feedback memory: {e}")
+
     def get_fingerprint(self, code: str) -> str:
         """
         Get fingerprint for a code snippet.
@@ -154,9 +189,10 @@ class AttemptManager:
             return False
     
     def log_attempt(self, attempt_count: int, code: str, result: Dict[str, Any], 
-                   score: float, fingerprint: Optional[str] = None):
+                   score: float, fingerprint: Optional[str] = None, 
+                   tool_feedback: Optional[Any] = None): # Added tool_feedback parameter
         """
-        Log an attempt.
+        Log an attempt and update feedback memory.
         
         Args:
             attempt_count (int): The attempt number.
@@ -164,6 +200,7 @@ class AttemptManager:
             result (dict): The execution result.
             score (float): The score for this attempt.
             fingerprint (str, optional): The fingerprint for this code.
+            tool_feedback (ToolFeedback, optional): Structured feedback for this attempt.
         """
         if fingerprint is None:
             fingerprint = self.get_fingerprint(code)
@@ -188,6 +225,20 @@ class AttemptManager:
         
         # Add to attempts list
         self.attempts.append(attempt)
+        
+        # --- Update Feedback Memory --- 
+        if tool_feedback and hasattr(tool_feedback, 'get_feedback_summary'):
+            feedback_summary = tool_feedback.get_feedback_summary()
+            feedback_summary['attempt'] = attempt_count # Add attempt number for context
+            feedback_summary['score'] = score # Add score for context
+            
+            if fingerprint not in self.feedback_memory:
+                self.feedback_memory[fingerprint] = []
+            self.feedback_memory[fingerprint].append(feedback_summary)
+            # Keep only the last N entries (redundant with save logic, but good for memory)
+            max_feedback_history = 5 
+            self.feedback_memory[fingerprint] = self.feedback_memory[fingerprint][-max_feedback_history:]
+        # --- End Update Feedback Memory ---
         
         # Save to history file (periodically)
         if attempt_count % 10 == 0:  # Save every 10 attempts
@@ -393,7 +444,8 @@ class AttemptManager:
             self.project_root / "memory" / "logs" / "best_attempt.json",
             self.project_root / "memory" / "logs" / "attempt_history.json",
             self.project_root / "memory" / "fingerprints.json",
-            self.metrics_state_file
+            self.metrics_state_file,
+            self.feedback_memory_file
         ]
         
         # Add any additional state files found in memory directory
@@ -429,6 +481,7 @@ class AttemptManager:
         # Reset instance variables
         self.attempts = []
         self.fingerprints = {}
+        self.feedback_memory = {}
         
         if deleted_count > 0:
             log.info(f"✅ Training state reset complete. {deleted_count} files were deleted.")

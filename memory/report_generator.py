@@ -368,6 +368,160 @@ class TrainingReportGenerator:
 
         return insights
 
+    def _call_local_llm(self, prompt: str) -> str:
+        """
+        Call a local LLM using LM Studio running on localhost to generate insights.
+        
+        Args:
+            prompt (str): The prompt to send to the LM Studio API
+            
+        Returns:
+            str: The generated text or a default message if the call fails
+        """
+        import requests
+        import json
+        import logging
+        
+        try:
+            base_url = "http://localhost:1234/v1"
+            logging.info("🌐 Attempting to connect to LM Studio on localhost:1234")
+            
+            headers = {"Content-Type": "application/json"}
+            chosen_model = None
+            
+            # First check if LM Studio is available and get available models
+            try:
+                models_response = requests.get(f"{base_url}/models", headers=headers, timeout=5)
+                if models_response.status_code == 200:
+                    models_data = models_response.json()
+                    available_models = [model["id"] for model in models_data.get("data", [])]
+                    logging.info(f"🤖 Available LM Studio models: {available_models}")
+                    
+                    # Prefer coding-specific models
+                    preferred_models = ["wizardcoder", "codellama", "code-llama", "stable-code", "starcoder", "llama"]
+                    for preferred in preferred_models:
+                        for model in available_models:
+                            if preferred.lower() in model.lower():
+                                chosen_model = model
+                                break
+                        if chosen_model: break
+                    
+                    if not chosen_model and available_models:
+                        chosen_model = available_models[0]
+                    
+                    if chosen_model:
+                        logging.info(f"🧠 Using LM Studio model: {chosen_model}")
+                    else:
+                        logging.warning("⚠️ No models available in LM Studio")
+                        return "No LM Studio models available to generate observations."
+                else:
+                    logging.warning(f"⚠️ Failed to retrieve models from LM Studio: {models_response.status_code}")
+                    return "Could not connect to LM Studio API."
+            except Exception as model_e:
+                logging.warning(f"⚠️ Error querying available models: {str(model_e)}")
+                return "Error connecting to LM Studio: " + str(model_e)
+                
+            # Proceed with API call
+            data = {
+                "messages": [
+                    {"role": "system", "content": "You are an AI assistant specializing in code generation and reinforcement learning analysis. Provide insightful observations about training reports."},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 500,
+                "temperature": 0.7
+            }
+            if chosen_model:
+                data["model"] = chosen_model
+            
+            logging.info(f"Sending prompt to LM Studio model {chosen_model}")
+            response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(data), timeout=15)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                generated_text = response_data['choices'][0]['message']['content'].strip()
+                return generated_text
+            else:
+                logging.warning(f"⚠️ LM Studio API error: {response.status_code} - {response.text}")
+                return f"LM Studio API error (HTTP {response.status_code})"
+                
+        except Exception as e:
+            logging.warning(f"⚠️ Error calling local LLM: {str(e)}")
+            return f"Error generating LLM observations: {str(e)}"
+
+    def add_llm_observations(self, report_data: dict, history: list, current_task) -> str:
+        """
+        Generate AI-powered observations about the training run using a local LLM.
+        
+        Args:
+            report_data (dict): The report data dictionary
+            history (list): The attempt history
+            current_task: The current task object
+            
+        Returns:
+            str: Generated observations text
+        """
+        # Build a prompt for the LLM with relevant training data
+        prompt = f"""
+Please analyze this training report data and provide insightful observations about the model's learning process.
+
+TASK: {getattr(current_task, 'name', 'Unknown')}
+DESCRIPTION: {getattr(current_task, 'description', 'No description available')}
+
+KEY METRICS:
+- Total Attempts: {report_data.get('total_attempts', 'N/A')}
+- Success Rate: {report_data.get('success_rate', 'N/A')}%
+- Best Score: {report_data.get('high_score', 'N/A')}
+- Score Trend: {report_data.get('score_trend', 'N/A')}
+- Training Time: {report_data.get('training_time', 'N/A')}
+
+COMMON ERRORS:
+- Error 1: {report_data.get('error_type_1', 'N/A')} (Count: {report_data.get('count_1', 'N/A')})
+- Error 2: {report_data.get('error_type_2', 'N/A')} (Count: {report_data.get('count_2', 'N/A')})
+- Error 3: {report_data.get('error_type_3', 'N/A')} (Count: {report_data.get('count_3', 'N/A')})
+
+CURRENT STATUS:
+- Plateau Status: {report_data.get('plateau_status', 'N/A')}
+- Semantic Drift: {report_data.get('semantic_drift_status', 'N/A')}
+- Hints Provided: {report_data.get('hint_usage', 'N/A')}
+- Stuck Events: {report_data.get('stuck_events', 'N/A')}
+- Beam Search Uses: {report_data.get('beam_search_uses', 'N/A')}
+
+HIGH SCORING EXAMPLE:
+```python
+{report_data.get('highest_scoring_code', 'No code available')}
+```
+
+Based on this data, please provide:
+1. 3-5 key observations about the model's learning process
+2. Potential strategies to improve performance
+3. Analysis of any learning bottlenecks or issues
+4. Suggestions for hyperparameter tuning if applicable
+
+Format your response with clear section headers and bullet points where appropriate.
+"""
+        # Call the local LLM for analysis
+        observations = self._call_local_llm(prompt)
+        
+        # If observations were generated successfully
+        if observations and not observations.startswith("Error"):
+            return f"""## AI Observations and Analysis
+
+{observations}
+
+*Generated using a local LM Studio model*
+"""
+        else:
+            # Return a placeholder with instructions if LLM call failed
+            return """## AI Observations and Analysis
+
+*LM Studio was not available to generate observations. To enable this feature:*
+1. Download and install LM Studio from https://lmstudio.ai/
+2. Load a code-specialized model (WizardCoder, CodeLlama, etc.)
+3. Start the local server on port 1234
+4. Run the training again to get AI-powered observations
+
+*Once set up, this section will contain AI-generated insights about your training run.*
+"""
 
     def generate_and_save_report(self,
                                  attempt_count: int,
@@ -557,6 +711,10 @@ class TrainingReportGenerator:
 
             # --- Populate Template ---
             report_content = self._populate_template(template, report_data)
+
+            # Add LLM-powered observations
+            llm_observations = self.add_llm_observations(report_data, history, current_task)
+            report_content += f"\n\n{llm_observations}"
 
             # --- Save Report ---
             timestamp_filename = f"training_report_{session_id}.md"

@@ -130,7 +130,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Add syntax-aware pattern detection
 
 - [✓] **5.2 Improve Duplicate Handling in `runner.py`**
-  - [ ] Add penalty for repeatedly generating similar but ineffective patterns
+  - [✓] Add penalty for repeatedly generating similar but ineffective patterns
   - [ ] Implement memory of failed approaches
   - [ ] Create "exploration boost" when stuck in repetitive patterns
   - [✓] Add fingerprint hash to duplicate status message for debugging
@@ -289,6 +289,8 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Implement beam search to maintain multiple candidate sequences
   - [✓] Use beam search when traditional generation is struggling
   - [✓] Apply grammar rules and hints within beam search
+  - [✓] Add logic to skip beam search occasionally if token distribution is skewed
+  - [✓] Add beam search cooling-off period after weight reset
 
 ### 13. Training Report System [NEW]
 
@@ -430,6 +432,13 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-08 (5):** Created a comprehensive training report template (`training_report.md`) that captures key metrics from training cycles. The template includes sections for run metadata, performance metrics, pattern analysis, learning status indicators, resource utilization, and historical comparisons. This will provide better visibility into the learning process and facilitate more informed adjustments to the system. Next steps involve implementing the report generator and integrating it with the training loop.
 *   **2025-04-08 (6):** Implemented the core `TrainingReportGenerator` and integrated it with `runner.py`. Reports are now generated periodically based on `config.ini`. Added basic token distribution analysis and keyword-based pattern counting to the report. Fixed several bugs related to template path resolution and import errors. Implemented report rotation to keep the latest 5 reports.
 *   **2025-04-08 (7):** Completed remaining core features for Task 13: Added option (`ReportOnSuccess`) to generate a final report on task success, implemented basic semantic drift detection based on output similarity, and added automatic generation of simple insights (plateau detection, syntax error frequency) and recommendations to the report.
+*   **2025-04-09:** Implemented several strategies to address training stagnation around 4500 iterations: 
+    - Added a penalty mechanism in `TrainingLoop._perform_learning_step` for repeatedly generating failed code patterns (Task 5.2).
+    - Enhanced `TrainingLoop._generate_code_attempt` with a weight reset trigger based on prolonged beam search stagnation (Task 12.4).
+    - Introduced a beam search cooling-off period after weight resets (Task 12.5).
+    - Added logic to occasionally skip beam search if token distribution becomes highly skewed (Task 12.5).
+    - Increased `HintProbabilityOnStuck` to 0.5 and slightly increased entropy coefficients in `config.ini` to encourage more exploration.
+    - Fixed indentation error in `AttemptManager.log_attempt`.
 
 ---
 

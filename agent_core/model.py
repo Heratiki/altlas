@@ -56,10 +56,12 @@ class AltLAS_RNN(nn.Module):
 
         # Initialize Linear layer
         init.xavier_uniform_(self.fc.weight)
-        init.zeros_(self.fc.bias)
+        # Changed from zeros to small random values
+        init.uniform_(self.fc.bias, -0.1, 0.1)  # Initialize with small random values
         logging.info(f"  Linear FC weights initialized (Xavier Uniform). Shape: {self.fc.weight.shape}")
         logging.info(f"    Mean: {self.fc.weight.mean():.4f}, Std: {self.fc.weight.std():.4f}, Min: {self.fc.weight.min():.4f}, Max: {self.fc.weight.max():.4f}")
-        logging.info(f"  Linear FC bias initialized (Zeros). Shape: {self.fc.bias.shape}")
+        logging.info(f"  Linear FC bias initialized (Uniform [-0.1, 0.1]). Shape: {self.fc.bias.shape}")
+        logging.info(f"    Mean: {self.fc.bias.mean():.4f}, Std: {self.fc.bias.std():.4f}, Min: {self.fc.bias.min():.4f}, Max: {self.fc.bias.max():.4f}")
 
         # LSTM layers are often initialized reasonably by default, 
         # but we can initialize their linear components if needed.

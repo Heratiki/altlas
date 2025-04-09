@@ -36,58 +36,81 @@ from memory.report_generator import TrainingReportGenerator
 from task.task_loader import TaskLoader
 from utils import get_pytorch_device
 
-# --- Centralized Logging Setup ---
+# --- Constants ---
 LOG_FILENAME = "altlas_run.log"
 
-# Load config.ini early to get logging level
-config = configparser.ConfigParser()
-config.read(Path(__file__).parent / 'config.ini')
-
-file_log_level_str = 'INFO'
-try:
-    file_log_level_str = config.get('Logging', 'FileLogLevel', fallback='INFO').upper()
-except Exception:
-    pass
-
-log_level_map = {
-    'CRITICAL': logging.CRITICAL,
-    'ERROR': logging.ERROR,
-    'WARNING': logging.WARNING,
-    'INFO': logging.INFO,
-    'DEBUG': logging.DEBUG
-}
-file_log_level = log_level_map.get(file_log_level_str, logging.INFO)
-
-# Create console for logging (UI display uses its own consoles)
-log_console = Console(stderr=True)
-
-# Configure root logger
-log = logging.getLogger()
-log.setLevel(file_log_level)  # Set root logger level based on file_log_level
-
-# Formatter for file logs
-file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# File Handler (Rotating) - Reduced to 2.5MB per file as requested
-file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=1*1024*1024, backupCount=5, encoding='utf-8')
-file_handler.setFormatter(file_formatter)
-file_handler.setLevel(file_log_level)  # Set from config
-
-# Console Handler (Rich)
-console_handler = RichHandler(console=log_console, rich_tracebacks=True, show_path=False)
-console_handler.setLevel(logging.INFO)  # Console shows INFO+
-
-# Remove existing handlers if any
-for handler in log.handlers[:]:
-    log.removeHandler(handler)
-
-# Add handlers
-log.addHandler(file_handler)
-log.addHandler(console_handler)
-# --- End Logging Setup ---
-
-# Global variable to hold the training loop instance for signal handling
+# Global variables
 training_loop_instance = None
+file_handler = None
+console_handler = None
+log = logging.getLogger()
+
+def setup_logging(recreate_handlers=False):
+    """
+    Set up logging with file and console handlers.
+    
+    Args:
+        recreate_handlers (bool): If True, remove and recreate all handlers.
+    """
+    global file_handler, console_handler, log
+    
+    # Load config.ini to get logging level
+    config = configparser.ConfigParser()
+    config.read(Path(__file__).parent / 'config.ini')
+
+    file_log_level_str = 'INFO'
+    try:
+        file_log_level_str = config.get('Logging', 'FileLogLevel', fallback='INFO').upper()
+    except Exception:
+        pass
+
+    log_level_map = {
+        'CRITICAL': logging.CRITICAL,
+        'ERROR': logging.ERROR,
+        'WARNING': logging.WARNING,
+        'INFO': logging.INFO,
+        'DEBUG': logging.DEBUG
+    }
+    file_log_level = log_level_map.get(file_log_level_str, logging.INFO)
+
+    # Create console for logging (UI display uses its own consoles)
+    log_console = Console(stderr=True)
+
+    # Configure root logger
+    log.setLevel(file_log_level)  # Set root logger level based on file_log_level
+
+    # Remove existing handlers if recreating
+    if recreate_handlers:
+        for handler in log.handlers[:]:
+            if isinstance(handler, logging.FileHandler):
+                handler.close()  # Properly close file handlers
+            log.removeHandler(handler)
+        
+        # Reset our global references
+        file_handler = None
+        console_handler = None
+
+    # Only create new handlers if they don't exist or we're recreating
+    if file_handler is None:
+        # Formatter for file logs
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # File Handler (Rotating) - 2.5MB per file
+        file_handler = RotatingFileHandler(LOG_FILENAME, maxBytes=2.5*1024*1024, backupCount=5, encoding='utf-8')
+        file_handler.setFormatter(file_formatter)
+        file_handler.setLevel(file_log_level)  # Set from config
+        log.addHandler(file_handler)
+    
+    if console_handler is None:
+        # Console Handler (Rich)
+        console_handler = RichHandler(console=log_console, rich_tracebacks=True, show_path=False)
+        console_handler.setLevel(logging.INFO)  # Console shows INFO+
+        log.addHandler(console_handler)
+    
+    return log
+
+# Initial logging setup
+setup_logging()
 
 # Define signal handler for Ctrl+C
 def signal_handler(sig, frame):
@@ -104,11 +127,7 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def main():
     """Main runner function that orchestrates the AltLAS workflow."""
-    global training_loop_instance
-
-    # Add console handler at the start of main
-    if console_handler not in log.handlers:
-        log.addHandler(console_handler)
+    global training_loop_instance, console_handler, file_handler
 
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Run the AltLAS Learning Agent.")
@@ -120,9 +139,6 @@ def main():
     task_to_load = args.task
     reset_training = args.reset
     # --- End Argument Parsing ---
-
-    log.info(f"🧠 Starting AltLAS - Task: {task_to_load}")
-    log.debug("Debug logging is active and directed to file.")
 
     try:
         # --- Initialize Core Components ---
@@ -136,10 +152,17 @@ def main():
         if reset_training:
             log.info("🔄 Reset flag detected - clearing all training state files...")
             reset_successful = attempt_manager.reset_training_state()
+            
+            # Recreate logging handlers after reset since the log files were deleted
+            setup_logging(recreate_handlers=True)
+            
             if reset_successful:
                 log.info("✅ Training state reset complete - starting from attempt 1")
             else:
                 log.warning("⚠️ No training state files were found to delete")
+        
+        log.info(f"🧠 Starting AltLAS - Task: {task_to_load}")
+        log.debug("Debug logging is active and directed to file.")
         
         # --- Determine PyTorch Device ---
         device = get_pytorch_device()

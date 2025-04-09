@@ -251,7 +251,6 @@ class CodeGenerator:
         except Exception as e:
             logging.error(f"Error loading model/optimizer state: {e}. Starting with fresh state.")
 
-
     def _parse_hint(self, hint: str) -> set:
         """Parses a hint string to find relevant token IDs from the vocabulary."""
         if not hint:
@@ -286,7 +285,7 @@ class CodeGenerator:
         "\n": ["    ", "def", "print", "var_", "return", "if", "for", "while", "class"]  # After newline expect indentation or statement
     }
 
-    def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None):
+    def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None, feedback_history_for_fp=None):
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
 
@@ -309,6 +308,32 @@ class CodeGenerator:
                     if feedback_relevant_token_ids:
                         logging.debug(f"Identified {len(feedback_relevant_token_ids)} tokens to penalize based on last feedback.")
             # --- End Feedback-Guided Exploration Adjustment ---
+
+            # --- Analyze Feedback History for Persistent Problem Tokens ---
+            persistent_penalty_factor = 0.6 # Stronger penalty for persistent problems
+            persistent_problem_token_ids = set()
+            if feedback_history_for_fp:
+                token_error_counts = collections.Counter()
+                error_count_for_fp = 0
+                for feedback_item in feedback_history_for_fp:
+                    if feedback_item.get('severity', 0) > 0.1:
+                        error_count_for_fp += 1
+                        for token_text in feedback_item.get('relevant_tokens', []):
+                            token_error_counts[token_text] += 1
+                
+                # If this fingerprint has failed multiple times, identify consistently relevant tokens
+                if error_count_for_fp >= 2:
+                    for token_text, count in token_error_counts.items():
+                        # If a token was relevant in >50% of the errors for this fingerprint
+                        if count > error_count_for_fp * 0.5:
+                            # Find the token ID
+                            for token_id, t_text in self.tokenizer.id_to_token.items():
+                                if t_text == token_text:
+                                    persistent_problem_token_ids.add(token_id)
+                                    break
+                    if persistent_problem_token_ids:
+                         logging.info(f"Identified {len(persistent_problem_token_ids)} persistent problem tokens for fingerprint based on history. Applying stronger penalty ({persistent_penalty_factor}).")
+            # --- End Feedback History Analysis ---
 
             # --- Success Token Boosting --- 
             successful_token_ids = set()
@@ -424,20 +449,32 @@ class CodeGenerator:
                         probabilities = probabilities / (probabilities.sum() + 1e-9)
                     # --- End Hint Bias ---
                     
-                    # --- Apply Feedback Penalty --- (Before Grammar/Top-k)
-                    if feedback_relevant_token_ids:
+                    # --- Apply Feedback Penalty (from last step AND persistent history) ---
+                    if feedback_relevant_token_ids or persistent_problem_token_ids:
                         penalty_applied_count = 0
-                        for token_id in feedback_relevant_token_ids:
-                            if 0 <= token_id < probabilities.shape[0]: # Check bounds
-                                probabilities[token_id] *= feedback_penalty_factor
+                        persistent_penalty_applied_count = 0
+                        for token_id in range(probabilities.shape[0]):
+                            applied_penalty = 1.0
+                            is_persistent = False
+                            if token_id in persistent_problem_token_ids:
+                                applied_penalty *= persistent_penalty_factor
+                                is_persistent = True
+                                persistent_penalty_applied_count += 1
+                            # Apply standard feedback penalty only if not already penalized as persistent
+                            elif token_id in feedback_relevant_token_ids:
+                                applied_penalty *= feedback_penalty_factor
                                 penalty_applied_count += 1
-                        if penalty_applied_count > 0:
+                                
+                            if applied_penalty < 1.0:
+                                probabilities[token_id] *= applied_penalty
+                                
+                        if penalty_applied_count > 0 or persistent_penalty_applied_count > 0:
                             # Re-normalize probabilities after penalizing
                             probabilities = probabilities / (probabilities.sum() + 1e-9)
-                            logging.debug(f"Applied penalty factor {feedback_penalty_factor} to {penalty_applied_count} tokens from last feedback.")
+                            # logging.debug(f"Applied penalties: Standard={penalty_applied_count}, Persistent={persistent_penalty_applied_count}")
                     # --- End Feedback Penalty ---
                     
-                    # --- Apply Success Token Boost --- (After penalty, before grammar)
+                    # --- Apply Success Token Boost ---
                     if successful_token_ids:
                         boost_applied_count = 0
                         for token_id in successful_token_ids:
@@ -524,7 +561,7 @@ class CodeGenerator:
             # Return None to indicate failure, handled by runner.py
             return None, None
 
-    def generate_with_beam_search(self, task=None, history=None, hint=None, beam_width=3, temperature=0.7, last_feedback=None):
+    def generate_with_beam_search(self, task=None, history=None, hint=None, beam_width=3, temperature=0.7, last_feedback=None, feedback_history_for_fp=None):
         """
         Generates code using beam search to maintain multiple candidate sequences.
         This helps the model produce more coherent code by considering multiple possibilities.
@@ -536,6 +573,7 @@ class CodeGenerator:
             beam_width (int): Number of candidate sequences to maintain
             temperature (float): Controls randomness in token selection
             last_feedback (ToolFeedback, optional): Feedback from the previous execution attempt.
+            feedback_history_for_fp (list, optional): History of feedback for fingerprint analysis.
             
         Returns:
             tuple: (code, token_ids) - The generated code and token IDs
@@ -562,6 +600,29 @@ class CodeGenerator:
                     if feedback_relevant_token_ids:
                         logging.debug(f"Identified {len(feedback_relevant_token_ids)} tokens to penalize in beam search based on last feedback.")
             # --- End Feedback-Guided Exploration Adjustment ---
+            
+            # --- Analyze Feedback History for Persistent Problem Tokens ---
+            persistent_penalty_factor = 0.6 # Stronger penalty for persistent problems
+            persistent_problem_token_ids = set()
+            if feedback_history_for_fp:
+                token_error_counts = collections.Counter()
+                error_count_for_fp = 0
+                for feedback_item in feedback_history_for_fp:
+                    if feedback_item.get('severity', 0) > 0.1:
+                        error_count_for_fp += 1
+                        for token_text in feedback_item.get('relevant_tokens', []):
+                            token_error_counts[token_text] += 1
+                
+                if error_count_for_fp >= 2:
+                    for token_text, count in token_error_counts.items():
+                        if count > error_count_for_fp * 0.5:
+                            for token_id, t_text in self.tokenizer.id_to_token.items():
+                                if t_text == token_text:
+                                    persistent_problem_token_ids.add(token_id)
+                                    break
+                    if persistent_problem_token_ids:
+                         logging.info(f"Beam Search: Identified {len(persistent_problem_token_ids)} persistent problem tokens. Applying stronger penalty ({persistent_penalty_factor}).")
+            # --- End Feedback History Analysis ---
             
             # --- Success Token Boosting --- 
             successful_token_ids = set()
@@ -656,20 +717,31 @@ class CodeGenerator:
                                     probabilities[token_id] *= hint_boost_factor
                             probabilities = probabilities / (probabilities.sum() + 1e-9)
                         
-                        # --- Apply Feedback Penalty --- (Before Grammar)
-                        if feedback_relevant_token_ids:
+                        # --- Apply Feedback Penalty (from last step AND persistent history) ---
+                        if feedback_relevant_token_ids or persistent_problem_token_ids:
                             penalty_applied_count = 0
-                            for token_id in feedback_relevant_token_ids:
-                                if 0 <= token_id < probabilities.shape[0]: # Check bounds
-                                    probabilities[token_id] *= feedback_penalty_factor
+                            persistent_penalty_applied_count = 0
+                            for token_id in range(probabilities.shape[0]):
+                                applied_penalty = 1.0
+                                is_persistent = False
+                                if token_id in persistent_problem_token_ids:
+                                    applied_penalty *= persistent_penalty_factor
+                                    is_persistent = True
+                                    persistent_penalty_applied_count += 1
+                                elif token_id in feedback_relevant_token_ids:
+                                    applied_penalty *= feedback_penalty_factor
                                     penalty_applied_count += 1
-                            if penalty_applied_count > 0:
+                                    
+                                if applied_penalty < 1.0:
+                                    probabilities[token_id] *= applied_penalty
+                                    
+                            if penalty_applied_count > 0 or persistent_penalty_applied_count > 0:
                                 # Re-normalize probabilities after penalizing
                                 probabilities = probabilities / (probabilities.sum() + 1e-9)
-                                logging.debug(f"Beam Step: Applied penalty factor {feedback_penalty_factor} to {penalty_applied_count} tokens from last feedback.")
+                                # logging.debug(f"Beam Step: Applied penalties: Standard={penalty_applied_count}, Persistent={persistent_penalty_applied_count}")
                         # --- End Feedback Penalty ---
                         
-                        # --- Apply Success Token Boost --- (After penalty, before grammar)
+                        # --- Apply Success Token Boost ---
                         if successful_token_ids:
                             boost_applied_count = 0
                             for token_id in successful_token_ids:

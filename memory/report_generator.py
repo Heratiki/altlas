@@ -10,6 +10,7 @@ import json
 import re
 import statistics
 import collections
+import ast
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -197,17 +198,49 @@ class TrainingReportGenerator:
                 simple_error_type = error_type.split(':')[0].strip()
                 metrics['error_counts'][simple_error_type] += 1
 
-        # TODO: Calculate Avg Gen/Exec Time if available in history
+        # --- AST-based Pattern Analysis --- 
+        def analyze_code_structure(code_str: str) -> Dict[str, int]:
+            """Analyzes code structure using AST and returns node counts."""
+            counts = collections.Counter()
+            if not code_str or code_str == DEFAULT_PLACEHOLDER:
+                return dict(counts)
+            try:
+                tree = ast.parse(code_str)
+                for node in ast.walk(tree):
+                    node_type = type(node).__name__
+                    # Count common structural nodes
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        counts['FunctionDefs'] += 1
+                    elif isinstance(node, ast.ClassDef):
+                        counts['ClassDefs'] += 1
+                    elif isinstance(node, (ast.For, ast.AsyncFor)):
+                        counts['ForLoops'] += 1
+                    elif isinstance(node, ast.While):
+                        counts['WhileLoops'] += 1
+                    elif isinstance(node, ast.If):
+                        counts['IfStatements'] += 1
+                    elif isinstance(node, ast.Assign):
+                        counts['Assignments'] += 1
+                    elif isinstance(node, ast.Call):
+                        counts['FunctionCalls'] += 1
+                    elif isinstance(node, ast.Return):
+                        counts['ReturnStatements'] += 1
+                    # Add more node types as needed
+            except SyntaxError:
+                counts['SyntaxError'] = 1 # Mark that parsing failed
+            except Exception as e:
+                logging.warning(f"AST analysis failed: {e}")
+                counts['ASTAnalysisFailed'] = 1
+            # Return sorted by count, descending
+            return dict(sorted(counts.items(), key=lambda item: item[1], reverse=True))
 
-        # TODO: Calculate Avg Gen/Exec Time if available in history
-
-        # Basic Pattern Analysis (Keyword Counting)
-        keywords = ['def', 'class', 'for', 'while', 'if', 'return', 'print', '+', '=', 'import']
-        if metrics['high_scoring_code'] != DEFAULT_PLACEHOLDER:
-             metrics['successful_patterns'] = sorted([f"{kw}: {metrics['high_scoring_code'].count(kw)}" for kw in keywords if metrics['high_scoring_code'].count(kw) > 0], key=lambda x: int(x.split(': ')[1]), reverse=True)[:3]
-        if metrics['low_scoring_code'] != DEFAULT_PLACEHOLDER:
-             metrics['failed_patterns'] = sorted([f"{kw}: {metrics['low_scoring_code'].count(kw)}" for kw in keywords if metrics['low_scoring_code'].count(kw) > 0], key=lambda x: int(x.split(': ')[1]), reverse=True)[:3]
-
+        successful_structure = analyze_code_structure(metrics['high_scoring_code'])
+        failed_structure = analyze_code_structure(metrics['low_scoring_code'])
+        
+        # Format for report (Top 3-5 structures)
+        metrics['successful_patterns'] = [f"{k}: {v}" for k, v in list(successful_structure.items())[:5]]
+        metrics['failed_patterns'] = [f"{k}: {v}" for k, v in list(failed_structure.items())[:5]]
+        # --- End AST-based Pattern Analysis ---
 
         # --- Semantic Drift Detection (Basic) ---
         drift_window_size = 20 # How many recent attempts to check for output similarity

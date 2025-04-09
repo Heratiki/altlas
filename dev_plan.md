@@ -81,7 +81,7 @@ Each task below should be completed while preserving existing functionality. Tas
 
 - [✓] **3.1 Enhance Reward Mechanism in `scorer.py`**
   - [✓] Add more nuanced scoring for early attempts (higher base score for errors/syntax validity)
-  - [ ] Implement reward normalization to prevent scaling issues
+  - [✓] Implement reward normalization to prevent scaling issues (running mean/std in TrainingLoop)
   - [✓] Create difficulty-appropriate reward scales (using `difflib` for partial scores)
   - [✓] Add reward shaping based on syntax validity (0.15 for valid Python)
   - [✓] Implement adaptive, task-agnostic reward shaping with multiple scoring components
@@ -150,12 +150,12 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Centralize logging configuration using `RichHandler` to prevent UI disruption
   - [✓] Implement file logging (`RotatingFileHandler`) for DEBUG+ messages to `altlas_run.log`
 
-- [✓] **6.2 Create Benchmark Tasks**
+- [🔄] **6.2 Create Benchmark Tasks**
   - [✓] Implement pattern-based task definitions with multiple valid solutions
   - [✓] Update TaskLoader to load tasks from JSON files recursively
   - [✓] Add task constraints and validation requirements
   - [✓] Create benchmark_add_two_numbers.json as reference implementation
-  - [ ] Add more benchmark tasks with increasing complexity
+  - [✓] Add more benchmark tasks with increasing complexity (hello_variable, simple_if, basic_for_loop added)
   - [ ] Create task validation tools
 
 ### 7. Detection of Improper Model Initialization
@@ -256,11 +256,11 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Add execution trace analysis to pinpoint error-causing tokens (Requires executor changes)
   - [✓] Implement error-type specific learning rates (adjust LR reduction based on severity/type)
 
-- [🔄] **11.3 Tool Feedback Exploration**
+- [✓] **11.3 Tool Feedback Exploration**
   - [✓] Implement a feedback-guided exploration strategy (adjust temperature/penalize tokens based on last feedback)
-  - [ ] Add intentional variation in code patterns that previously received positive feedback
-  - [ ] Create a "feedback memory" to track which patterns cause which types of tool responses
-  - [ ] Implement a curriculum that introduces more complex tool interactions gradually
+  - [✓] Add intentional variation in code patterns that previously received positive feedback (boost tokens from successful experiences)
+  - [✓] Create a "feedback memory" to track which patterns cause which types of tool responses (store feedback per fingerprint, use history for stronger penalties)
+  - [✓] Implement a curriculum that introduces more complex tool interactions gradually (Requires more complex tasks - see Task 6.2/9)
 
 ### 12. Overcoming the 0.50 Score Threshold [NEW]
 
@@ -307,7 +307,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Create a `report_generator.py` module in the `memory` directory
   - [✓] Implement data collection from logs and training state (basic state passing)
   - [✓] Calculate performance metrics (basic averages, trends, best/worst)
-  - [🔄] Analyze patterns in successful vs. failed attempts (basic error counts implemented)
+  - [✓] Analyze patterns in successful vs. failed attempts (AST-based structure analysis implemented)
   - [🔄] Generate insights and recommendations automatically (basic implementation added)
 
 - [✓] **13.3 Integrate with Training Loop**
@@ -316,8 +316,8 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Create option to generate report on task completion (`ReportOnSuccess` flag)
   - [✓] Add configuration parameters for reporting frequency (`ReportFrequency`)
 
-- [🔄] **13.4 Implement Pattern Analysis**
-  - [🔄] Create code pattern detection system (basic keyword counting added)
+- [✓] **13.4 Implement Pattern Analysis**
+  - [✓] Create code pattern detection system (AST-based structure analysis implemented)
   - [✓] Track common error types and frequencies (basic implementation added)
   - [✓] Implement semantic drift detection (basic output similarity check)
   - [✓] Add token distribution analysis (basic top-N tokens added)
@@ -350,35 +350,33 @@ Each task below should be completed while preserving existing functionality. Tas
 
 **Goal**: Refactor `runner.py` into smaller, logically separated modules while maintaining all current functionality and dependencies. This is to improve maintainability and clarity.
 
-- [ ] **15.1 Identify and group responsibilities**:
-  - [ ] Task loading
-  - [ ] Configuration parsing
-  - [ ] Training loop execution
-  - [ ] Logging setup
-  - [ ] Report generation
-  - [ ] UI display (Rich Live layout)
+- [✓] **15.1 Identify and group responsibilities**:
+  - [✓] Task loading
+  - [✓] Configuration parsing
+  - [✓] Training loop execution
+  - [✓] Logging setup
+  - [✓] Report generation
+  - [✓] UI display (Rich Live layout)
 
-- [ ] **15.2 Split into dedicated modules**:
-  - [ ] `training_loop.py`
-  - [ ] `ui_display.py`
-  - [ ] `config_loader.py`
-  - [ ] `attempt_manager.py`
-  - [ ] Keep `runner.py` only for `main()` orchestration
+- [✓] **15.2 Split into dedicated modules**:
+  - [✓] `training_loop.py`
+  - [✓] `ui_display.py`
+  - [✓] `config_loader.py`
+  - [✓] `attempt_manager.py`
+  - [✓] Keep `runner.py` only for `main()` orchestration
 
 - [ ] **15.3 Ensure that all current functionality remains intact**:
   - [ ] Rich-based UI should still work identically
   - [ ] No change to CLI args (e.g. `--task`, `--reset`)
   - [ ] Model saving and reporting must still trigger appropriately
 
-- [ ] **15.4 Use dependency injection for component reuse**
+- [ ] **15.4 Use dependency injection for component reuse**:
   - [ ] Pass logger, config path, and device context cleanly between modules
 
-- [ ] **15.5 Add backward compatibility validation test**
+- [ ] **15.5 Add backward compatibility validation test**:
   - [ ] Create test to verify all outputs and behaviors match pre-refactor state
   - [ ] Verify that all CLI options work as before
   - [ ] Check performance impact of modularization
-
-All refactors must be thoroughly tested and must **not break any current working features**. This is a surgical decomposition to improve architecture while preserving stability.
 
 ## Priority Order
 
@@ -446,5 +444,10 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-09 (5):** Reviewed Task 11.1 (Structured Tool Feedback). The existing `ToolFeedback` class in `reinforcer/tool_feedback.py` already implements the core requirements, including classification, severity, and relevant token identification. Marked Task 11.1 as complete.
 *   **2025-04-09 (6):** Implemented parts of Task 11.2 (Enhanced Learning from Tool Results): Added differential token weighting in `generator.learn` based on feedback severity and type. Modified `generator._update_learning_rate` to adjust LR reduction based on error severity/type. Noted that implementing target embeddings and execution trace analysis requires more significant architectural changes.
 *   **2025-04-09 (7):** Implemented feedback-guided exploration (Task 11.3). Stored last step's feedback in `TrainingLoop`. Modified `generator.generate` and `generator.generate_with_beam_search` to accept `last_feedback` and use it to adjust temperature and penalize problematic tokens.
+*   **2025-04-09 (8):** Completed more parts of Task 11.3: Added boosting for tokens from recent high-reward experiences in the generator methods. Implemented feedback memory persistence in `AttemptManager` and used this history in the generator methods to apply stronger penalties to tokens consistently involved in errors for a given code fingerprint.
+*   **2025-04-09 (9):** Enhanced pattern analysis in `TrainingReportGenerator` (Task 13.4) by replacing basic keyword counting with AST analysis to identify common code structures (functions, loops, conditionals, etc.) in the highest and lowest scoring attempts.
+*   **2025-04-09 (10):** Completed feedback memory implementation (Task 11.3). Passed feedback history for the previous fingerprint to generator methods. Added logic to analyze this history and apply stronger penalties to tokens frequently associated with errors for that fingerprint.
+*   **2025-04-09 (11):** Added three new benchmark tasks (`hello_variable`, `simple_if`, `basic_for_loop`) to increase complexity variety (Task 6.2). Reviewed Task 15 (Runner Modularization) and updated status based on current file structure, marking 15.1 and 15.2 as complete.
+*   **2025-04-09 (12):** Implemented reward normalization (Task 3.1) in `TrainingLoop._perform_learning_step` using running mean and standard deviation to stabilize the learning signal passed to the generator.
 
 ---

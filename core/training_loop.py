@@ -118,6 +118,13 @@ class TrainingLoop:
         
         # Feedback from last step
         self.last_tool_feedback = None
+        
+        # Reward normalization stats
+        self.reward_sum = 0.0
+        self.reward_sum_sq = 0.0
+        self.reward_count = 0
+        self.reward_mean = 0.0
+        self.reward_std = 1.0 # Initialize std to 1 to avoid division by zero initially
     
     def set_user_interrupted(self):
         """Set the user interrupted flag."""
@@ -543,6 +550,24 @@ class TrainingLoop:
     def _perform_learning_step(self, score: float, generated_ids: List[int], 
                               code_attempt: str, result: Dict[str, Any]):
         """Perform the learning step using the generator."""
+        # --- Reward Normalization (Update Stats) ---
+        self.reward_count += 1
+        self.reward_sum += score
+        self.reward_sum_sq += score**2
+        # Update mean and std using Welford's online algorithm or simpler method for stability
+        # Simple running mean and std calculation:
+        self.reward_mean = self.reward_sum / self.reward_count
+        # Calculate variance: E[X^2] - (E[X])^2
+        variance = (self.reward_sum_sq / self.reward_count) - (self.reward_mean ** 2)
+        # Ensure variance is non-negative due to potential floating point errors
+        variance = max(0, variance)
+        self.reward_std = variance ** 0.5
+        # Avoid division by zero if std dev is very small
+        epsilon = 1e-8 
+        if self.reward_std < epsilon:
+            self.reward_std = epsilon
+        # --- End Reward Normalization Stats Update ---
+        
         # Calculate dynamic entropy coefficient
         if self.attempt_count > 0:
             success_rate = self.stats["Success Attempts"] / self.attempt_count
@@ -563,7 +588,6 @@ class TrainingLoop:
         tool_feedback = self.scorer.get_tool_feedback(code_attempt, result)
         
         # Calculate more graduated rewards using the specialized reward calculation method
-        # to provide better learning signals
         use_calculate_reward = self.runner_config.get('use_calculated_reward', True)
         
         if use_calculate_reward:
@@ -643,8 +667,13 @@ class TrainingLoop:
             self.score_before_hint = None
         # --- End Hint Impact Tracking ---
 
-        # Pass the final score (potentially penalized) with dynamic coefficient and tool feedback to the learn method
-        self.generator.learn(score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
+        # --- Normalize Score for Learning --- 
+        normalized_score = (score - self.reward_mean) / self.reward_std
+        log.debug(f"Reward Normalization: Raw={score:.4f}, Mean={self.reward_mean:.4f}, Std={self.reward_std:.4f}, Normalized={normalized_score:.4f}")
+        # --- End Normalize Score ---
+
+        # Pass the NORMALIZED score with dynamic coefficient and tool feedback to the learn method
+        self.generator.learn(normalized_score, generated_ids, current_entropy_coef, tool_feedback=tool_feedback)
         
         # Store the feedback for the next generation step
         self.last_tool_feedback = tool_feedback

@@ -93,3 +93,4 @@ temp/
 # Backup files
 *.bak
 *.tmp
+memory/state.json

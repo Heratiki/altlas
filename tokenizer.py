@@ -86,6 +86,24 @@ class Tokenizer:
         # --- Normalization step ---
         text = self._normalize_code(text)
 
+        # --- Insert INDENT/DEDENT tokens based on indentation levels ---
+        lines = text.split('\n')
+        processed_lines = []
+        indent_stack = [0]  # Stack of indentation levels
+        for line in lines:
+            stripped = line.lstrip(' \t')
+            indent_len = len(line) - len(stripped)
+            tokens = []
+            if indent_len > indent_stack[-1]:
+                tokens.append('<INDENT>')
+                indent_stack.append(indent_len)
+            while indent_len < indent_stack[-1]:
+                tokens.append('<DEDENT>')
+                indent_stack.pop()
+            tokens.append(stripped)
+            processed_lines.append(' '.join(tokens))
+        text = '\n'.join(processed_lines)
+
         encoded_ids = [self.sos_token_id]
         remaining_text = text
         current_pos = 0

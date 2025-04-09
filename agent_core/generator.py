@@ -146,6 +146,38 @@ class CodeGenerator:
         # Attempt to load previous state
         self._load_state() # Call load state during initialization
 
+    def reset_weights(self):
+        """
+        Reset the model weights to break out of local minima.
+        This method reinitializes the model with fresh weights and resets the optimizer.
+        """
+        logging.info("Resetting model weights to break out of potential local minimum...")
+        
+        # Create a new model instance with the same architecture but fresh weights
+        self.model = AltLAS_RNN(
+            vocab_size=self.tokenizer.vocab_size,
+            embedding_dim=self.embedding_dim,
+            hidden_dim=self.hidden_dim,
+            num_layers=self.num_layers
+        ).to(self.device)
+        
+        # Reinitialize the optimizer with the new model parameters
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        
+        # Reset learning related state variables
+        self.baseline = 0.0
+        self.current_lr = self.learning_rate
+        self.no_improvement_count = 0
+        
+        # Clear the experience buffer to prevent reinforcement of old patterns
+        self.experience_buffer.clear()
+        
+        # Re-validate the new weights
+        self._validate_initial_weights()
+        
+        logging.info(f"Model weights reset successfully. New parameter count: {sum(p.numel() for p in self.model.parameters())}")
+        return True
+
     def _validate_initial_weights(self, std_threshold=1e-6, max_abs_mean=1.0, entropy_threshold=0.5):
         """Performs basic sanity checks on initial model weights and output distribution."""
         logging.info("Validating initial model weights and output distribution...")

@@ -286,7 +286,7 @@ class CodeGenerator:
         "\n": ["    ", "def", "print", "var_", "return", "if", "for", "while", "class"]  # After newline expect indentation or statement
     }
 
-    def generate(self, task=None, history=None, hint=None, temperature=0.7):
+    def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None):
         """
         Generates a code attempt using the RNN model by sampling token by token.
         Also tracks token generation frequency.
@@ -296,6 +296,7 @@ class CodeGenerator:
             history (list, optional): List of previous attempts
             hint (str, optional): Optional hint to guide generation
             temperature (float, optional): Controls randomness in token selection (lower=more deterministic)
+            last_feedback (ToolFeedback, optional): Feedback from the previous execution attempt.
         """
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
@@ -478,7 +479,7 @@ class CodeGenerator:
             # Return None to indicate failure, handled by runner.py
             return None, None
 
-    def generate_with_beam_search(self, task=None, history=None, hint=None, beam_width=3, temperature=0.7):
+    def generate_with_beam_search(self, task=None, history=None, hint=None, beam_width=3, temperature=0.7, last_feedback=None):
         """
         Generates code using beam search to maintain multiple candidate sequences.
         This helps the model produce more coherent code by considering multiple possibilities.
@@ -489,6 +490,7 @@ class CodeGenerator:
             hint (str, optional): Optional hint to guide generation
             beam_width (int): Number of candidate sequences to maintain
             temperature (float): Controls randomness in token selection
+            last_feedback (ToolFeedback, optional): Feedback from the previous execution attempt.
             
         Returns:
             tuple: (code, token_ids) - The generated code and token IDs

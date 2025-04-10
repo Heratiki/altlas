@@ -766,7 +766,14 @@ class CodeGenerator:
             generated_ids_tensor = torch.LongTensor(generated_ids).to(self.device)
     
             logging.debug(f"Returning from generate. Code type: {type(generated_code)}, Generated IDs shape: {generated_ids_tensor.shape}")
-            logging.debug(f"Generated code: '{generated_code}'")
+            if getattr(self, 'debug_mode', False):
+                logging.debug(f"[DEBUG] Abstract token IDs: {generated_ids}")
+                try:
+                    tokens = [self.tokenizer.id_to_token.get(tid, "<UNK>") for tid in generated_ids]
+                    logging.debug(f"[DEBUG] Abstract tokens: {tokens}")
+                except Exception:
+                    pass
+                logging.debug(f"[DEBUG] Decoded source code:\n{generated_code}")
 
             # Check for empty or invalid generation
             penalize_empty_generations = getattr(self, 'penalize_empty_generations', True)

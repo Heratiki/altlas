@@ -183,6 +183,13 @@ class AttemptScorer:
         feedback_type = tool_feedback.feedback_type
         
         # Initialize various scoring components
+
+        # After scoring is complete, log final reward
+        if getattr(self, 'debug_mode', False):
+            try:
+                logging.debug(f"[DEBUG] Final reward score: {result.reward if hasattr(result, 'reward') else 'N/A'}")
+            except Exception:
+                pass
         scores = {
             'syntax': self._evaluate_syntax(code_attempt, task),
             'execution': self._evaluate_execution(result, feedback_type),

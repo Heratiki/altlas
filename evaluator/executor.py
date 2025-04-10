@@ -75,7 +75,19 @@ class CodeExecutor:
         
     def execute(self, code, language="python"):
         """Execute the provided code and return the results.
-        
+        """
+        if getattr(self, 'debug_mode', False):
+            logging.debug(f"[DEBUG] Executing code in language: {language}")
+        """Execute the provided code and return the results.
+        """
+        if getattr(self, 'debug_mode', False):
+            logging.debug(f"[DEBUG] Executing code in language: {language}")
+            logging.debug(f"[DEBUG] Code to execute:\n{code}")
+
+        # (rest of execute logic...)
+
+            logging.debug(f"[DEBUG] Code to execute:\n{code}")
+        """
         Args:
             code (str): The code to execute.
             language (str): The programming language of the code (e.g., "python", "javascript").
@@ -146,3 +158,12 @@ class CodeExecutor:
             exit_code=exit_code,
             code=code  # Include the original code
         )
+
+        # After execution, log results
+        if getattr(self, 'debug_mode', False):
+            try:
+                logging.debug(f"[DEBUG] Execution stdout: {stdout.strip()}")
+                logging.debug(f"[DEBUG] Execution stderr: {stderr.strip()}")
+                logging.debug(f"[DEBUG] Execution return code: {exit_code}")
+            except Exception:
+                pass

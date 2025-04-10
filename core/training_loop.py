@@ -334,8 +334,10 @@ class TrainingLoop:
                 scr_state = self.scorer.get_state()
                 attempt_history = self.attempt_manager.get_history()
 
-                log.debug(f"Calling generate_and_save_report with history length: {len(attempt_history)}")
-                report_path = self.report_generator.generate_and_save_report(
+                log.debug(f"Calling generate_report_async with history length: {len(attempt_history)}")
+                
+                # Use the new asynchronous version instead of the blocking version
+                report_id = self.report_generator.generate_report_async(
                     attempt_count=self.attempt_count,
                     max_attempts=self.runner_config['max_attempts'],
                     current_task=self.current_task,
@@ -349,14 +351,12 @@ class TrainingLoop:
                     beam_search_uses=self.beam_search_uses,
                     hint_impact_history=self.hint_impact_history # Pass hint impact data
                 )
-                if report_path:
-                    log.info(f"📊 Training report generation successful. Report saved to {report_path}")
-                    self.ui_display.add_status_message(f"📊 Report generated: {Path(report_path).name}")
-                else:
-                    log.warning(f"⚠️ Training report generation process indicated failure for attempt {self.attempt_count}.")
+                
+                log.info(f"📊 Training report generation queued with report ID: {report_id}")
+                self.ui_display.add_status_message(f"📊 Report generation started in background")
             except Exception as e:
                 log.error(f"⚠️ UNEXPECTED Error during training report generation trigger for attempt {self.attempt_count}: {e}", exc_info=True)
-                self.ui_display.add_status_message(f"❌ Error generating report for attempt {self.attempt_count}")
+                self.ui_display.add_status_message(f"❌ Error queuing report for attempt {self.attempt_count}")
     
     def _update_stuck_status(self):
         """Check for stuck state and potentially request a hint."""
@@ -786,8 +786,9 @@ class TrainingLoop:
                scr_state = self.scorer.get_state()
                attempt_history = self.attempt_manager.get_history()
 
-               log.debug(f"Calling generate_and_save_report (on success) with history length: {len(attempt_history)}")
-               report_path = self.report_generator.generate_and_save_report(
+               log.debug(f"Calling generate_report_async (on success) with history length: {len(attempt_history)}")
+               # Use the asynchronous version instead of the blocking version
+               report_id = self.report_generator.generate_report_async(
                    attempt_count=self.attempt_count,
                    max_attempts=self.runner_config['max_attempts'],
                    current_task=self.current_task,
@@ -801,12 +802,12 @@ class TrainingLoop:
                    beam_search_uses=self.beam_search_uses,
                    hint_impact_history=self.hint_impact_history # Pass hint impact data
                )
-               if report_path:
-                   log.info(f"📊 Final training report saved to {report_path}")
-               else:
-                   log.warning(f"⚠️ Final training report generation process indicated failure.")
+               log.info(f"📊 Final training report generation queued with report ID: {report_id}")
+               print(f"\n📊 Final report generation has been started in the background")
+               print(f"   Report will be available at memory/reports/latest_report.md when completed")
            except Exception as final_report_e:
                log.error(f"⚠️ Error during final report generation: {final_report_e}", exc_info=True)
+               print("\n⚠️ Error queuing final report generation")
         
         # --- Log Final Token Frequencies --- 
         if hasattr(self.generator, 'token_frequency'):
@@ -832,6 +833,19 @@ class TrainingLoop:
             best_attempt=best_attempt_num,
             run_stats=final_stats
         )
+        
+        # --- Ensure Worker Thread Cleanup ---
+        try:
+            # Inform the user if there are pending reports
+            if hasattr(self.report_generator, 'report_queue') and not self.report_generator.report_queue.empty():
+                pending_count = self.report_generator.report_queue.qsize()
+                print(f"\nThere are {pending_count} report(s) still being generated in the background.")
+                print(f"These will complete even after the summary is shown.")
+            
+            # Don't stop the worker thread here, as it might be processing the final report
+            # The thread is a daemon thread and will be terminated when the main program exits
+        except Exception as e:
+            log.warning(f"Error checking report queue status: {e}")
 
     # --- Advisor Hint Generation Logic --- 
     # (Moved from runner.py, slightly adapted to be methods of the class)

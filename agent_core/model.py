@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
-import torch.nn.init as init # Import init module
-import logging # Import logging
+import torch.nn.init as init  # Import init module
+import logging  # Import logging
+import math  # Needed for positional encoding
 from typing import Tuple
 
 # Configure logging - REMOVED basicConfig call
@@ -12,22 +13,98 @@ class AltLAS_RNN(nn.Module):
     A simple Recurrent Neural Network (RNN) model using LSTM for AltLAS code generation.
     Takes token IDs as input and outputs logits over the vocabulary for the next token.
     """
-    def __init__(self, vocab_size: int, embedding_dim: int, hidden_dim: int, num_layers: int = 1):
+    def __init__(
+        self,
+        vocab_size: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        num_layers: int = 1,
+        use_attention: bool = False,
+        num_attention_heads: int = 4,
+        positional_encoding_type: str = "none",  # 'none', 'sinusoidal', 'learned'
+        dropout: float = 0.0,
+        use_layernorm: bool = False,
+        attention_residual: bool = True,
+        max_seq_len: int = 512,
+    ):
         """
         Initializes the RNN model layers.
 
         Args:
-            vocab_size (int): The total number of unique tokens in the vocabulary.
-            embedding_dim (int): The dimensionality of the token embeddings.
-            hidden_dim (int): The dimensionality of the LSTM hidden state.
-            num_layers (int): Number of LSTM layers.
+            vocab_size (int): Total number of unique tokens.
+            embedding_dim (int): Dimensionality of token embeddings.
+            hidden_dim (int): Dimensionality of LSTM hidden state.
+            num_layers (int): Number of stacked LSTM layers.
+            use_attention (bool): Enable multi-head self-attention after LSTM.
+            num_attention_heads (int): Number of attention heads if attention enabled.
+            positional_encoding_type (str): 'none', 'sinusoidal', or 'learned'.
+            dropout (float): Dropout probability (0.0 disables dropout).
+            use_layernorm (bool): Enable LayerNorm after LSTM and attention.
+            attention_residual (bool): Add residual connection over attention output.
+            max_seq_len (int): Maximum sequence length for positional encoding.
         """
         super().__init__()
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
-        # Optional: Enable attention mechanism (default False for stability-first)\n        self.use_attention = True  # Set True to enable attention, or make configurable\n\n        # Positional encoding buffer (fixed sinusoidal)\n        max_seq_len = 512  # or configurable\n        pe = torch.zeros(max_seq_len, self.embedding_dim)\n        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)\n        div_term = torch.exp(torch.arange(0, self.embedding_dim, 2).float() * (-math.log(10000.0) / self.embedding_dim))\n        pe[:, 0::2] = torch.sin(position * div_term)\n        pe[:, 1::2] = torch.cos(position * div_term)\n        self.register_buffer('positional_encoding', pe.unsqueeze(0))  # shape (1, max_seq_len, embedding_dim)\n\n        # Multi-head self-attention layer (query=key=value=LSTM outputs)\n        self.attention = nn.MultiheadAttention(embed_dim=self.hidden_dim, num_heads=4, batch_first=True)\n
         self.num_layers = num_layers
+        self.num_attention_heads = num_attention_heads
+        self.max_seq_len = max_seq_len
+
+        # Initial user-specified flags (may be overridden)
+        self.use_attention = use_attention
+        self.use_layernorm = use_layernorm
+        self.attention_residual = attention_residual
+        self.positional_encoding_type = positional_encoding_type
+
+        # Dropout
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        # Auto-configure features based on heuristics
+        self._auto_configure_features()
+
+        # Validate attention head divisibility if attention enabled
+        if self.use_attention:
+            if self.hidden_dim % self.num_attention_heads != 0:
+                raise ValueError(f"hidden_dim ({self.hidden_dim}) must be divisible by num_attention_heads ({self.num_attention_heads}) when using attention.")
+            if self.embedding_dim % self.num_attention_heads != 0:
+                raise ValueError(f"embedding_dim ({self.embedding_dim}) must be divisible by num_attention_heads ({self.num_attention_heads}) when using attention.")
+
+        # Embedding layer
+        self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+
+        # Positional encoding (only if enabled)
+        if self.positional_encoding_type == "sinusoidal":
+            pe = torch.zeros(max_seq_len, embedding_dim)
+            position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+            div_term = torch.exp(torch.arange(0, embedding_dim, 2).float() * (-math.log(10000.0) / embedding_dim))
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.register_buffer('positional_encoding', pe.unsqueeze(0))  # (1, max_seq_len, embedding_dim)
+        elif self.positional_encoding_type == "learned":
+            self.positional_encoding = nn.Embedding(max_seq_len, embedding_dim)
+        else:
+            self.positional_encoding = None
+
+        # LSTM
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=num_layers, batch_first=True)
+
+        # Optional LayerNorm after LSTM
+        self.lstm_norm = nn.LayerNorm(hidden_dim) if self.use_layernorm else nn.Identity()
+
+        # Attention
+        if self.use_attention:
+            self.attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_attention_heads, batch_first=True)
+            self.attention_norm = nn.LayerNorm(hidden_dim) if self.use_layernorm else nn.Identity()
+        else:
+            self.attention = None
+            self.attention_norm = nn.Identity()
+
+        # Final output layer
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+
+        # Initialize weights
+        self._initialize_weights()
 
         # Layer 1: Embedding layer
         # Maps input token IDs to dense vectors.
@@ -46,6 +123,36 @@ class AltLAS_RNN(nn.Module):
         # Initialize weights explicitly
         self._initialize_weights()
 
+    def _auto_configure_features(self):
+        """
+        Automatically enable or disable features based on model size and heuristics.
+        """
+        # Enable attention if hidden_dim is large enough
+        if self.hidden_dim >= 128:
+            self.use_attention = True
+        else:
+            self.use_attention = False
+
+        # Enable residuals and layernorm if attention is enabled
+        if self.use_attention:
+            self.attention_residual = True
+            self.use_layernorm = True
+        else:
+            self.attention_residual = False
+            self.use_layernorm = False
+
+        # Enable positional encoding if max_seq_len is reasonably long
+        if self.max_seq_len > 16:
+            self.positional_encoding_type = "sinusoidal"
+        else:
+            self.positional_encoding_type = "none"
+
+        # Log summary
+        posenc_str = self.positional_encoding_type.capitalize() if self.positional_encoding_type != "none" else "None"
+        logging.info(f"[MODEL CONFIG] Attention: {'✅' if self.use_attention else '❌'} | "
+                     f"Residuals: {'✅' if self.attention_residual else '❌'} | "
+                     f"PosEnc: {posenc_str} | "
+                     f"LayerNorm: {'✅' if self.use_layernorm else '❌'}")
     def _initialize_weights(self):
         """Initialize model weights using standard methods."""
         logging.info("Initializing model weights...")
@@ -110,14 +217,33 @@ class AltLAS_RNN(nn.Module):
         # 1. Get embeddings
         # input_seq shape: (batch_size, seq_length)
         # embedded shape: (batch_size, seq_length, embedding_dim)
-        # Add positional encoding to embeddings (truncate if needed)\n        seq_len = embedded.size(1)\n        embedded = embedded + self.positional_encoding[:, :seq_len, :]\n
         embedded = self.embedding(input_seq)
+        # Add positional encoding if enabled
+        if self.positional_encoding_type == "sinusoidal" and hasattr(self, 'positional_encoding'):
+            seq_len = embedded.size(1)
+            embedded = embedded + self.positional_encoding[:, :seq_len, :]
+        elif self.positional_encoding_type == "learned" and hasattr(self, 'positional_encoding'):
+            seq_len = embedded.size(1)
+            positions = torch.arange(seq_len, device=embedded.device).unsqueeze(0).expand(embedded.size(0), seq_len)
+            embedded = embedded + self.positional_encoding(positions)
+        # else: no positional encoding
 
         # 2. Pass embeddings through LSTM
         # lstm_out shape: (batch_size, seq_length, hidden_dim)
         # hidden_state tuple shapes: (num_layers, batch_size, hidden_dim)
         lstm_out, hidden_state = self.lstm(embedded, hidden_state)
-        # Optionally apply self-attention on top of LSTM outputs\n        if self.use_attention:\n            # MultiheadAttention expects (batch, seq, feature) with batch_first=True\n            attn_output, _ = self.attention(lstm_out, lstm_out, lstm_out)\n            lstm_out = attn_output\n
+        lstm_out = self.lstm_norm(lstm_out)
+        lstm_out = self.dropout(lstm_out)
+        
+        # Optionally apply self-attention on top of LSTM outputs
+        if self.use_attention and self.attention is not None:
+            attn_output, _ = self.attention(lstm_out, lstm_out, lstm_out)
+            attn_output = self.attention_norm(attn_output)
+            attn_output = self.dropout(attn_output)
+            if self.attention_residual:
+                lstm_out = lstm_out + attn_output  # residual connection
+            else:
+                lstm_out = attn_output
 
         # 3. Pass LSTM output through the final linear layer
         # output_logits shape: (batch_size, seq_length, vocab_size)

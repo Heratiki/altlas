@@ -55,7 +55,7 @@ def setup_logging(recreate_handlers=False, debug_mode=False):
     global file_handler, console_handler, log
     
     # Load config.ini to get logging level
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
     config.read(Path(__file__).parent / 'config.ini')
 
     file_log_level_str = 'INFO'

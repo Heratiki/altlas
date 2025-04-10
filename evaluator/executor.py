@@ -27,7 +27,7 @@ class CodeExecutor:
     """Executes code attempts safely and returns results."""
     
     def __init__(self, config_path="config.ini"):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
         # Use absolute path for reliability within modules
         abs_config_path = Path(__file__).parent.parent / config_path
         config.read(abs_config_path)

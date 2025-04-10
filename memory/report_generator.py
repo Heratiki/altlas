@@ -14,6 +14,9 @@ import ast
 import matplotlib.pyplot as plt
 import numpy as np
 import torch # Needed for tensor operations
+import threading
+import queue
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -30,6 +33,15 @@ class TrainingReportGenerator:
             self.template_path = project_root / template_path
             self.metrics_state_file = self.report_dir / "metrics_state.json"
             self.metrics_state = self._load_metrics_state()
+            
+            # Initialize the background report generation queue and thread
+            self.report_queue = queue.Queue()
+            self.worker_thread = None
+            self.worker_running = False
+            
+            # Initialize a list to track report generation status
+            self.pending_reports = []
+            self.completed_reports = []
 
             logging.info(f"ReportGenerator initialized. Report dir: {self.report_dir}, Template path: {self.template_path}")
 
@@ -881,3 +893,203 @@ Format your response with clear section headers and bullet points where appropri
                 logging.info(f"Deleted old report: {file_to_delete.name}")
             except OSError as del_e:
                 logging.error(f"Error deleting report file {file_to_delete}: {del_e}")
+
+    def _worker_thread_function(self):
+        """Background worker thread function for processing report generation requests."""
+        self.worker_running = True
+        logging.info("Background report generation worker thread started")
+        
+        while self.worker_running:
+            try:
+                # Get report request from queue with timeout to allow checking worker_running flag
+                try:
+                    report_request = self.report_queue.get(timeout=1.0)
+                except queue.Empty:
+                    # No request in queue, continue the loop
+                    continue
+                
+                # Process the report request
+                report_id = report_request.get('report_id', f"report_{int(time.time())}")
+                logging.info(f"Processing report request {report_id} in background thread")
+                
+                # Extract parameters from the request
+                attempt_count = report_request.get('attempt_count')
+                max_attempts = report_request.get('max_attempts')
+                current_task = report_request.get('current_task')
+                history = report_request.get('history')
+                generator_state = report_request.get('generator_state')
+                scorer_state = report_request.get('scorer_state')
+                start_time = report_request.get('start_time')
+                hints_provided = report_request.get('hints_provided')
+                success_count = report_request.get('success_count')
+                stuck_events = report_request.get('stuck_events', 0)
+                beam_search_uses = report_request.get('beam_search_uses', 0)
+                hint_impact_history = report_request.get('hint_impact_history')
+                
+                # Generate and save the report
+                try:
+                    report_path = self.generate_and_save_report(
+                        attempt_count=attempt_count,
+                        max_attempts=max_attempts,
+                        current_task=current_task,
+                        history=history,
+                        generator_state=generator_state,
+                        scorer_state=scorer_state,
+                        start_time=start_time,
+                        hints_provided=hints_provided,
+                        success_count=success_count,
+                        stuck_events=stuck_events,
+                        beam_search_uses=beam_search_uses,
+                        hint_impact_history=hint_impact_history
+                    )
+                    
+                    # Record that the report was completed successfully
+                    self.completed_reports.append({
+                        'report_id': report_id,
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'report_path': str(report_path),
+                        'status': 'completed'
+                    })
+                    
+                    # Remove from pending list
+                    self.pending_reports = [r for r in self.pending_reports if r.get('report_id') != report_id]
+                    
+                    logging.info(f"Background report generation completed for {report_id}, saved to {report_path}")
+                
+                except Exception as e:
+                    logging.error(f"Error generating report {report_id} in background thread: {e}", exc_info=True)
+                    
+                    # Record the error
+                    self.completed_reports.append({
+                        'report_id': report_id,
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'status': 'error',
+                        'error_message': str(e)
+                    })
+                    
+                    # Remove from pending list
+                    self.pending_reports = [r for r in self.pending_reports if r.get('report_id') != report_id]
+                
+                # Mark task as done in the queue
+                self.report_queue.task_done()
+                
+            except Exception as e:
+                logging.error(f"Unexpected error in report generator worker thread: {e}", exc_info=True)
+                # Don't terminate the thread on unexpected errors
+        
+        logging.info("Background report generation worker thread terminated")
+
+    def start_worker_thread(self):
+        """Start the background worker thread if it's not already running."""
+        if self.worker_thread is None or not self.worker_thread.is_alive():
+            self.worker_running = True
+            self.worker_thread = threading.Thread(
+                target=self._worker_thread_function,
+                daemon=True  # Make thread terminate when main program exits
+            )
+            self.worker_thread.start()
+            logging.info("Started background report generation worker thread")
+            return True
+        return False
+
+    def stop_worker_thread(self):
+        """Stop the background worker thread."""
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_running = False
+            # Give the thread a chance to terminate gracefully
+            self.worker_thread.join(timeout=2.0)
+            if self.worker_thread.is_alive():
+                logging.warning("Background report generation worker thread did not terminate gracefully")
+            else:
+                logging.info("Background report generation worker thread stopped successfully")
+            return True
+        return False
+
+    def generate_report_async(self,
+                             attempt_count: int,
+                             max_attempts: int,
+                             current_task: Any,
+                             history: List[Dict],
+                             generator_state: Dict,
+                             scorer_state: Dict,
+                             start_time: float,
+                             hints_provided: int,
+                             success_count: int,
+                             stuck_events: int = 0,
+                             beam_search_uses: int = 0,
+                             hint_impact_history: List[Tuple[float, float]] = None) -> str:
+        """
+        Queue a training report to be generated asynchronously in a background thread.
+        
+        This method returns immediately and doesn't block the caller. The report will be
+        generated by a background worker thread.
+        
+        Args:
+            (Same parameters as generate_and_save_report)
+            
+        Returns:
+            str: A report ID that can be used to check the status of the report generation
+        """
+        # Start worker thread if not already running
+        self.start_worker_thread()
+        
+        # Generate a unique report ID
+        report_id = f"report_{int(time.time())}_{len(self.pending_reports)}"
+        
+        # Create report request
+        report_request = {
+            'report_id': report_id,
+            'timestamp': datetime.utcnow().isoformat(),
+            'attempt_count': attempt_count,
+            'max_attempts': max_attempts,
+            'current_task': current_task,
+            'history': history.copy() if history else [],  # Make a copy to prevent changes while processing
+            'generator_state': generator_state,
+            'scorer_state': scorer_state,
+            'start_time': start_time,
+            'hints_provided': hints_provided,
+            'success_count': success_count,
+            'stuck_events': stuck_events,
+            'beam_search_uses': beam_search_uses,
+            'hint_impact_history': hint_impact_history,
+            'status': 'pending'
+        }
+        
+        # Add to pending list
+        self.pending_reports.append({
+            'report_id': report_id,
+            'timestamp': datetime.utcnow().isoformat(),
+            'status': 'pending'
+        })
+        
+        # Add request to queue for processing
+        self.report_queue.put(report_request)
+        
+        logging.info(f"Queued report generation request {report_id} for background processing")
+        return report_id
+
+    def get_report_status(self, report_id: str) -> Dict:
+        """Get the status of a queued or completed report."""
+        # Check pending reports
+        for report in self.pending_reports:
+            if report.get('report_id') == report_id:
+                return report
+        
+        # Check completed reports
+        for report in self.completed_reports:
+            if report.get('report_id') == report_id:
+                return report
+        
+        # Not found
+        return {'report_id': report_id, 'status': 'not_found'}
+
+    def cleanup(self):
+        """Clean up resources before shutdown."""
+        self.stop_worker_thread()
+        # Wait for any pending reports to finish
+        if not self.report_queue.empty():
+            try:
+                self.report_queue.join(timeout=5.0)
+                logging.info("Waited for pending reports to complete during cleanup")
+            except Exception as e:
+                logging.warning(f"Error waiting for report queue to complete: {e}")

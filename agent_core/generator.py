@@ -46,7 +46,7 @@ class CodeGenerator:
             device (torch.device): The PyTorch device to use (cpu or cuda).
         """
         # --- Read Config ---
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
         # config_path is expected relative to project root where runner.py is
         abs_config_path = Path(config_path).resolve()
         if not abs_config_path.exists():
@@ -112,6 +112,19 @@ class CodeGenerator:
              raise
         # --- End Read Config ---
 
+        # Parse ModelFlags from config if present
+        try:
+            self.use_attention = config.getboolean('ModelFlags', 'UseAttention', fallback=True)
+            self.use_layernorm = config.getboolean('ModelFlags', 'UseLayerNorm', fallback=True)
+            self.use_residual = config.getboolean('ModelFlags', 'UseResidual', fallback=True)
+            self.use_positional_encoding = config.getboolean('ModelFlags', 'UsePositionalEncoding', fallback=True)
+        except Exception:
+            # Fallback defaults if section missing or error
+            self.use_attention = True
+            self.use_layernorm = True
+            self.use_residual = True
+            self.use_positional_encoding = True
+
         self.device = device
         logging.info(f"CodeGenerator using device: {self.device}")
 
@@ -126,7 +139,11 @@ class CodeGenerator:
             vocab_size=self.tokenizer.vocab_size,
             embedding_dim=self.embedding_dim,
             hidden_dim=self.hidden_dim,
-            num_layers=self.num_layers
+            num_layers=self.num_layers,
+            use_attention=self.use_attention,
+            use_layernorm=self.use_layernorm,
+            attention_residual=self.use_residual,
+            positional_encoding_type="sinusoidal" if self.use_positional_encoding else "none"
         ).to(self.device)
         logging.info(f"Initialized AltLAS_RNN model with {sum(p.numel() for p in self.model.parameters())} parameters.")
 
@@ -167,7 +184,11 @@ class CodeGenerator:
             vocab_size=self.tokenizer.vocab_size,
             embedding_dim=self.embedding_dim,
             hidden_dim=self.hidden_dim,
-            num_layers=self.num_layers
+            num_layers=self.num_layers,
+            use_attention=self.use_attention,
+            use_layernorm=self.use_layernorm,
+            attention_residual=self.use_residual,
+            positional_encoding_type="sinusoidal" if self.use_positional_encoding else "none"
         ).to(self.device)
         
         # Reinitialize the optimizer with the new model parameters
@@ -398,6 +419,19 @@ class CodeGenerator:
         # Add more rules as needed for brackets, commas, etc.
     }
     def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None, feedback_history_for_fp=None):
+        # Configurable constants
+        min_tokens_before_stop = getattr(self, 'min_tokens_before_stop', 3)
+        enable_logit_noise = getattr(self, 'enable_logit_noise', True)
+        logit_noise_std = getattr(self, 'logit_noise_std', 0.1)
+        enable_entropy_adaptation = getattr(self, 'enable_entropy_adaptation', True)
+        entropy_increase_factor = getattr(self, 'entropy_increase_factor', 1.1)
+        max_entropy_temperature = getattr(self, 'max_entropy_temperature', 1.5)
+        repetition_overuse_threshold = getattr(self, 'repetition_overuse_threshold', 0.5)  # 50% of recent outputs
+        repetition_window_size = getattr(self, 'repetition_window_size', 50)
+        if not hasattr(self, 'token_overuse_counter'):
+            self.token_overuse_counter = collections.Counter()
+        if not hasattr(self, 'recent_generations'):
+            self.recent_generations = collections.deque(maxlen=repetition_window_size)
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
 
@@ -518,6 +552,11 @@ class CodeGenerator:
                     # Apply ADJUSTED temperature to logits before softmax
                     if adjusted_temperature != 1.0:
                         last_logits = last_logits / adjusted_temperature
+
+                    # Optionally inject noise into logits to encourage exploration
+                    if enable_logit_noise:
+                        noise = torch.randn_like(last_logits) * logit_noise_std
+                        last_logits = last_logits + noise
 
                     # Apply softmax to get probabilities for sampling
                     probabilities = F.softmax(last_logits, dim=-1)
@@ -651,9 +690,11 @@ class CodeGenerator:
                         max_entropy = torch.log(torch.tensor(self.tokenizer.vocab_size, dtype=torch.float)).item()
                         normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
                         
-                        if normalized_entropy < self.early_stop_entropy_threshold:
+                        if normalized_entropy < self.early_stop_entropy_threshold and _ + 1 >= min_tokens_before_stop:
                             logging.info(f"Early stopping generation due to low entropy ({normalized_entropy:.4f} < {self.early_stop_entropy_threshold:.4f}) at step {_ + 1}.")
                             break # Exit generation loop
+                        elif normalized_entropy < self.early_stop_entropy_threshold:
+                            logging.debug(f"Entropy {normalized_entropy:.4f} below threshold but continuing (step {_ + 1} < min_tokens_before_stop={min_tokens_before_stop})")
 
                     # 2. Repetition Check
                     if self.early_stop_repetition_window > 0 and len(generated_ids) >= self.early_stop_repetition_window:
@@ -676,6 +717,27 @@ class CodeGenerator:
                     # --- Token Handling ---
                     # 1. Stop if EOS token is generated
                     if next_token_id == self.tokenizer.eos_token_id:
+                        # Track generated token for overuse detection
+                        self.token_overuse_counter[next_token_id] += 1
+                        generated_ids.append(next_token_id)
+                        generated_in_sequence.add(next_token_id)
+
+                    # Add to recent generations window
+                    self.recent_generations.append(next_token_id)
+
+                    # After generation, check for overuse of any token
+                    if _ == max_gen_length - 1 or next_token_id == self.tokenizer.eos_token_id:
+                        overused_tokens = []
+                        for token_id, count in self.token_overuse_counter.items():
+                            recent_count = sum(1 for t in self.recent_generations if t == token_id)
+                            freq = recent_count / max(1, len(self.recent_generations))
+                            if freq > repetition_overuse_threshold:
+                                overused_tokens.append(token_id)
+                        if overused_tokens and enable_entropy_adaptation:
+                            old_temp = adjusted_temperature
+                            adjusted_temperature = min(max_entropy_temperature, adjusted_temperature * entropy_increase_factor)
+                            logging.info(f"Detected overused tokens {overused_tokens} (freq>{repetition_overuse_threshold}). Increasing temperature {old_temp:.2f} -> {adjusted_temperature:.2f} for next generation.")
+
                         break
 
                     # 2. Store generated ID (excluding SOS, implicitly excluding EOS by breaking)

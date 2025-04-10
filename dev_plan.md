@@ -75,6 +75,10 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Track gradient statistics during learning (log gradient norm in `generator.py`)
   - [✓] Monitor weight changes over time to detect vanishing/exploding gradients (`TrainingLoop._monitor_training_stability`)
   - [✓] Add early warning for training instability (`TrainingLoop._monitor_training_stability`)
+- [✓] **2.4 Validate Model Parameter Compatibility**
+  - [✓] Check that `hidden_dim % num_attention_heads == 0` if attention enabled
+  - [✓] Check that `embedding_dim % num_attention_heads == 0` if attention enabled
+  - [✓] Raise clear errors if incompatible
 
 ### 3. Training Signal Enhancement
 
@@ -237,11 +241,14 @@ Each task below should be completed while preserving existing functionality. Tas
 **Goal**: Enhance the neural architecture to better handle code generation
 
 - [✓] **10.1 Attention Mechanisms**
-  - [✓] Add self-attention layer to better handle long-range dependencies (*Code exists but disabled in model.py*)
-  - [✓] Implement position encoding for token positions (*Code exists but disabled in model.py*)
+  - [✓] Add multi-head self-attention layer
+  - [✓] Add residual connection over attention output
+  - [✓] Add positional encoding (sinusoidal and learned)
+  - [✓] Add optional LayerNorm after LSTM and attention
+  - [✓] Implement auto-configuration logic to enable/disable features based on model size
+  - [✓] Add runtime override of features via `[ModelFlags]` in config.ini
+  - [✓] Log model feature configuration at startup
   - [ ] Add cross-attention for task/hint integration
-  - [✓] Implement multi-head attention (*Code exists but disabled in model.py*)
-  - *Note: Attention mechanism code is present in `model.py` but currently commented out/disabled.*
 
 - [✓] **10.2 Hierarchical Generation**
   - [✓] Add code structure prediction via abstract grammar rules (`ABSTRACT_GRAMMAR_RULES`).
@@ -363,6 +370,21 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Enhance fingerprint logging to include token pattern information.
   - [ ] Use token-fingerprint correlations to cluster outcome patterns and adjust generation strategies accordingly.
 
+### 20. Configuration System Improvements [NEW]
+
+**Goal:** Improve configuration robustness, clarity, and runtime flexibility.
+
+- [✓] **20.1 Improve Config File Structure**
+  - [✓] Clean up and comment all config.ini sections
+  - [✓] Add `[ModelFlags]` section for runtime feature toggles
+- [✓] **20.2 Fix Inline Comment Parsing**
+  - [✓] Update all configparser initializations with `inline_comment_prefixes=(';', '#')`
+  - [✓] Prevents parsing errors from inline comments
+- [✓] **20.3 Integrate Config Flags into Runtime**
+  - [✓] Parse `[ModelFlags]` in generator.py
+  - [✓] Pass feature flags to model at init and reset
+  - [✓] Override model auto-config with explicit flags
+
 ### 15. Runner Modularization [NEW]
 
 **Goal**: Refactor `runner.py` into smaller, logically separated modules while maintaining all current functionality and dependencies. This is to improve maintainability and clarity.
@@ -386,8 +408,10 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Rich-based UI should still work identically
   - [ ] No change to CLI args (e.g. `--task`, `--reset`)
   - [ ] Model saving and reporting must still trigger appropriately
+
 - [ ] **15.4 Use dependency injection for component reuse**: (*Partially done, review needed*)
   - [ ] Pass logger, config path, and device context cleanly between modules
+  
 - [ ] **15.5 Add backward compatibility validation test**:
   - [ ] Create test to verify all outputs and behaviors match pre-refactor state
   - [ ] Verify that all CLI options work as before

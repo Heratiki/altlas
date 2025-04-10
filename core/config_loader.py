@@ -27,7 +27,7 @@ class ConfigLoader:
         else:
             self.config_path = Path(config_path)
             
-        self.config = configparser.ConfigParser()
+        self.config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
         self._load_config()
     
     def _load_config(self):

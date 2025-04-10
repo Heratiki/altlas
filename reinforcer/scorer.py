@@ -18,7 +18,7 @@ class AttemptScorer:
     """Scores execution results against task criteria."""
 
     def __init__(self, config_path="config.ini"):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(inline_comment_prefixes=(';', '#'))
         # Use absolute path for reliability within modules
         abs_config_path = Path(__file__).parent.parent / config_path
         if not abs_config_path.exists():

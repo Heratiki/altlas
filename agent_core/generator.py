@@ -435,6 +435,44 @@ class CodeGenerator:
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
 
+            # --- MODEL HEALTH CHECK ---
+            # Track number of consecutive distribution collapses
+            if not hasattr(self, 'distribution_collapse_counter'):
+                self.distribution_collapse_counter = 0
+                self.last_collapse_reset = 0
+                self.consecutive_failures = 0
+            
+            # Reset model weights if consecutive collapses exceed threshold
+            # This is more aggressive than our regular learning-rate adjustments
+            attempt_count = history.attempt_count if history and hasattr(history, 'attempt_count') else 0
+            if (self.distribution_collapse_counter >= 5 and 
+                attempt_count - self.last_collapse_reset > 20):
+                logging.warning(f"Model has experienced {self.distribution_collapse_counter} distribution collapses. " 
+                              f"Resetting model weights to break out of pathological state.")
+                self.model.reinitialize_weights()
+                self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+                self.distribution_collapse_counter = 0
+                self.last_collapse_reset = attempt_count
+                self.baseline = 0.0
+                self.current_lr = self.learning_rate
+                
+                # Temporarily increase temperature significantly right after reset
+                temperature = min(2.0, temperature * 2)
+                logging.info(f"Increased temperature to {temperature} after model reset")
+            
+            # Track consecutive failures to help identify stuck model
+            if last_feedback and hasattr(last_feedback, 'severity') and last_feedback.severity > 0.3:
+                self.consecutive_failures += 1
+            else:
+                self.consecutive_failures = 0
+                
+            # If model is producing many consecutive failures, gradually increase temperature
+            if self.consecutive_failures > 10:
+                temp_boost = min(1.0, self.consecutive_failures * 0.05)
+                temperature = min(1.5, temperature + temp_boost)
+                logging.info(f"Boosting temperature to {temperature} after {self.consecutive_failures} consecutive failures")
+            # --- END MODEL HEALTH CHECK ---
+
             # --- Feedback-Guided Exploration Adjustment ---
             feedback_penalty_factor = 0.8 # How much to reduce probability of error-related tokens (e.g., 0.8 means 20% reduction)
             feedback_relevant_token_ids = set()
@@ -557,6 +595,29 @@ class CodeGenerator:
                     if enable_logit_noise:
                         noise = torch.randn_like(last_logits) * logit_noise_std
                         last_logits = last_logits + noise
+
+                    # EMERGENCY RECOVERY: Reset collapsed distributions when entropy is too low
+                    # Calculate entropy before softmax to check for collapse
+                    max_val = last_logits.max().item()
+                    min_val = last_logits.min().item()
+                    # Detect if the distribution has collapsed (one value much higher than all others)
+                    if max_val - min_val > 20.0:  # Extremely skewed logits
+                        # Detect if we're in a stuck loop (same token repeatedly)
+                        if len(generated_ids) >= 2 and all(x == generated_ids[-1] for x in generated_ids[-2:]):
+                            logging.warning(f"DISTRIBUTION COLLAPSE DETECTED - Emergency logit reset at step {_}")
+                            # Apply a much stronger intervention - reset logits to small random values
+                            last_logits = torch.rand_like(last_logits) * 0.1
+                            # Boost template tokens more aggressively
+                            if hinted_token_ids:
+                                for token_id in hinted_token_ids:
+                                    if 0 <= token_id < last_logits.shape[0]:
+                                        last_logits[token_id] += 3.0  # Strong bias, not just multiplier
+                            # Force recovery by temporarily boosting common useful tokens
+                            useful_tokens = [self.tokenizer.token_to_id.get(t, -1) for t in 
+                                           ["def", "print", "return", "=", "+", "(", ")", ":", "\n"]]
+                            for token_id in useful_tokens:
+                                if token_id >= 0 and token_id < last_logits.shape[0]:
+                                    last_logits[token_id] += 2.0  # Strong bias
 
                     # Apply softmax to get probabilities for sampling
                     probabilities = F.softmax(last_logits, dim=-1)

@@ -105,6 +105,42 @@ class ConfigLoader:
             log.error(f"Error parsing Scorer configuration: {e}")
             raise
     
+    def get_llm_config(self):
+        """
+        Get the LLM configuration section with parsed values.
+        
+        Returns:
+            dict: Dictionary containing the LLM configuration values.
+        """
+        try:
+            llm_config = self.get_section('LLM')
+            
+            # Parse model preference list
+            model_pref_str = llm_config.get('ModelPreference', 'wizardcoder,codellama,code-llama,stable-code,starcoder,llama')
+            model_preference = [m.strip() for m in model_pref_str.split(',') if m.strip()]
+            
+            return {
+                'provider': llm_config.get('Provider', 'vllm'),
+                'vllm_base_url': llm_config.get('vLLMBaseURL', 'http://localhost:8000/v1'),
+                'lmstudio_base_url': llm_config.get('LMStudioBaseURL', 'http://localhost:1234/v1'),
+                'model_preference': model_preference,
+                'timeout': llm_config.getint('Timeout', 120),
+                'temperature': llm_config.getfloat('Temperature', 0.7),
+                'max_tokens': llm_config.getint('MaxTokens', 500),
+            }
+        except (KeyError, ValueError) as e:
+            log.error(f"Error parsing LLM configuration: {e}")
+            # Return defaults or raise? For now, return defaults to be robust
+            return {
+                'provider': 'vllm',
+                'vllm_base_url': 'http://localhost:8000/v1',
+                'lmstudio_base_url': 'http://localhost:1234/v1',
+                'model_preference': ['wizardcoder', 'codellama', 'code-llama', 'stable-code', 'starcoder', 'llama'],
+                'timeout': 120,
+                'temperature': 0.7,
+                'max_tokens': 500,
+            }
+    
     def get_config_path(self):
         """
         Get the path to the configuration file.

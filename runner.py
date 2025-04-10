@@ -201,7 +201,8 @@ def main():
         safety_checker = SafetyChecker() 
         executor = CodeExecutor(config_path=config_path_str)
         scorer = AttemptScorer(config_path=config_path_str)
-        report_generator = TrainingReportGenerator()
+        llm_config = config_loader.get_llm_config()
+        report_generator = TrainingReportGenerator(llm_config=llm_config)
         # --- End AltLAS Component Initialization ---
 
         # --- Initialize Training Loop ---

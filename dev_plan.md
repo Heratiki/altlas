@@ -27,6 +27,8 @@ This conservative approach ensures that the evolution of AltLAS builds on our wo
   - Improved with Python grammar rules and template-guided generation ✓ PARTIALLY ADDRESSED
 - **Task Complexity Scaling**: Current architecture may struggle with more complex programming tasks
 - **Resource Management**: Need better control over computational resources per task
+- **Model Distribution Collapse**: Model occasionally gets stuck in pathological states generating the same tokens repeatedly
+  - Emergency distribution recovery helps, but more robust mechanisms needed
 
 ## Implementation Plan
 
@@ -113,6 +115,7 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Support for experience replay of successful attempts
 
   - [ ] Explore per-token or delayed reward mechanisms.
+
 ### 4. Tokenization and Vocabulary Improvements
 
 **Goal**: Ensure the vocabulary and tokenization support effective code generation
@@ -139,7 +142,6 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Apply entropy boost if imbalance persists > N iterations (*Handled via generator logic/temperature*)
   - [✓] Penalize overused tokens directly in logit sampling (softmax) (`generator.py`)
   - [✓] Add config option: `TokenImbalancePenalty = 0.2` (`config.ini`)
-
 
 ### 5. Fingerprinting and Duplicate Detection
 
@@ -427,32 +429,32 @@ Each task below should be completed while preserving existing functionality. Tas
 
 **Goal**: Replace current OPENAI/LM Studio implementation with vLLM to improve performance, reduce costs, and optimize usage patterns across the codebase.
 
-- [ ] **16.1 Set Up vLLM Infrastructure**
-  - [ ] Create a dedicated `llm_provider` module to abstract LLM API interactions
-  - [ ] Implement vLLM server configuration with appropriate model options
-  - [ ] Add fallback mechanisms for when vLLM is unavailable
-  - [ ] Set up batching capabilities to optimize throughput
-  - [ ] Implement configuration options for vLLM-specific parameters (model path, quantization, batch size, etc.)
+- [🔄] **16.1 Set Up vLLM Infrastructure**
+  - [✓] Create a dedicated `llm_provider` module to abstract LLM API interactions
+  - [✓] Implement vLLM server configuration with appropriate model options (via `config.ini`)
+  - [✓] Add fallback mechanisms for when vLLM is unavailable (vLLM -> LM Studio)
+  - [ ] Set up batching capabilities to optimize throughput (*Stubbed for now*)
+  - [✓] Implement configuration options for vLLM-specific parameters (`[LLM]` section in `config.ini`)
 
-- [ ] **16.2 Implement Request Optimization**
-  - [ ] Add request batching to combine multiple similar requests
-  - [ ] Implement caching to avoid redundant LLM calls (e.g., for similar hints)
+- [🔄] **16.2 Implement Request Optimization**
+  - [✓] Add request batching to combine multiple similar requests (sequential stub implemented)
+  - [✓] Implement caching to avoid redundant LLM calls (simple LRU cache added)
   - [ ] Create a prompt template system to standardize and optimize prompts
   - [ ] Implement token counting to minimize input sizes
   - [ ] Add asynchronous request handling to improve throughput
 
-- [ ] **16.3 Migrate Existing LLM Calls**
-  - [ ] Identify all current LLM integration points (hint generation, report analysis, etc.)
-  - [ ] Refactor `TrainingReportGenerator._call_local_llm` to use the new vLLM provider
-  - [ ] Update hint generation in `TrainingLoop._get_hint_from_advisor`
-  - [ ] Create compatibility layer for existing code
+- [🔄] **16.3 Migrate Existing LLM Calls**
+  - [✓] Identify all current LLM integration points (hint generation, report analysis)
+  - [✓] Refactor `TrainingReportGenerator._call_local_llm` to use the new vLLM provider
+  - [✓] Update hint generation in `TrainingLoop._get_hint_from_advisor`
+  - [ ] Create compatibility layer for existing code (*Provider handles fallback*)
   - *Note (2025-04-09): Increased LM Studio API timeout in `TrainingReportGenerator._call_local_llm` to 120s to mitigate premature timeouts.*
 
-- [ ] **16.4 Implement Performance Monitoring**
-  - [ ] Add instrumentation to track LLM request latency
-  - [ ] Monitor token usage and costs
-  - [ ] Implement adaptive request throttling based on system load
-  - [ ] Create detailed logging for LLM interactions
+- [🔄] **16.4 Implement Performance Monitoring**
+  - [✓] Add instrumentation to track LLM request latency
+  - [✓] Monitor token usage and costs (basic token counting)
+  - [✓] Implement adaptive request throttling based on system load (latency-based delay)
+  - [✓] Create detailed logging for LLM interactions (latency, tokens, errors)
   - [ ] Add performance metrics to training reports
 
 - [ ] **16.5 Enhance LLM-Based Features**
@@ -461,7 +463,6 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Implement code review capabilities for generated solutions
   - [ ] Add automatic prompt tuning based on hint effectiveness
   - [ ] Create an LLM-based code analyzer for deeper report insights
-
 
 ### 17. Execution Safety and Sandboxing [NEW, PLANNED]
 
@@ -480,7 +481,6 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Develop custom AST analysis rules to detect potentially harmful patterns beyond basic regex.
 - [ ] **17.4 Capability Limiting**
   - [ ] Investigate methods to restrict access to dangerous Python modules/built-ins within the execution context.
-
 
 ### 18. Parallel Training Loop Implementation [NEW, PLANNED]
 
@@ -562,6 +562,84 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Validate training performance on non-Python tasks
   - [ ] Measure and optimize any performance impact from dynamic language loading
   - [ ] Document language support status and limitations
+
+### 21. LLM-Guided Model Health Monitoring [NEW, PLANNED]
+
+**Goal**: Create a robust system for monitoring and correcting pathological model states using LLM guidance
+
+- [ ] **21.1 Design Model Health Metrics**
+  - [ ] Implement comprehensive probability distribution analysis (entropy, kurtosis, skewness)
+  - [ ] Track distribution collapse events (consecutive zero-entropy outputs)
+  - [ ] Monitor gradient statistics over time with anomaly detection
+  - [ ] Create token diversity metrics to identify repetitive patterns
+  - [ ] Track exploration-exploitation balance through custom metrics
+
+- [ ] **21.2 Build LLM Diagnostic Interface**
+  - [ ] Create `model_health_monitor.py` module with LLM integration
+  - [ ] Develop standardized diagnostic protocol for collecting metrics
+  - [ ] Design prompt templates for different diagnostic scenarios
+  - [ ] Implement selective LLM invocation based on severity triggers
+  - [ ] Build a "diagnosis history" to track interventions and outcomes
+
+- [ ] **21.3 Implement Partial Weight Reset Strategy**
+  - [ ] Design selective weight reset methods (output layer only, specific layers)
+  - [ ] Implement gradient re-normalization without full reset
+  - [ ] Create "weight checkpointing" to restore to previous healthy states
+  - [ ] Develop progressive reset strategy (least invasive to most invasive)
+  - [ ] Add entropy injection mechanisms that preserve learned patterns
+
+- [ ] **21.4 Create Multi-Model Guidance System**
+  - [ ] Implement cycling through different LLM models for diagnosis
+  - [ ] Create consensus mechanism to prevent single-model bias
+  - [ ] Add model-switching based on task type or error pattern
+  - [ ] Implement confidence scoring for model recommendations
+  - [ ] Build automated prompt adjustment based on model performance
+
+- [ ] **21.5 Integrate with Training Loop**
+  - [ ] Add health check scheduling in training loop (every N attempts)
+  - [ ] Implement intervention triggers based on anomaly detection
+  - [ ] Create logging and reporting for health-related interventions
+  - [ ] Add configuration options for health monitoring frequency
+  - [ ] Implement emergency intervention for critical distribution collapse
+
+- [ ] **21.6 Automate Recovery Actions**
+  - [ ] Create an action framework for implementing LLM recommendations
+  - [ ] Build pattern-specific intervention strategies
+  - [ ] Implement temperature management based on distribution analysis
+  - [ ] Add token probability redistribution for targeted recovery
+  - [ ] Create automatic task simplification when model is struggling
+
+### 22. Benchmark-Agnostic Recovery Strategies [NEW, PLANNED]
+
+**Goal**: Expand on the current emergency distribution recovery with more sophisticated, language-agnostic approaches
+
+- [ ] **22.1 Implement Distribution Analysis**
+  - [ ] Create probability distribution visualization tools
+  - [ ] Add entropy profiling across multiple generation attempts
+  - [ ] Implement anomaly detection for distribution patterns
+  - [ ] Track correlation between distribution shapes and outcomes
+  - [ ] Create benchmark-independent distribution norms
+
+- [ ] **22.2 Develop Progressive Recovery Techniques**
+  - [ ] Implement staged recovery based on distribution severity
+  - [ ] Create token-level intervention strategies
+  - [ ] Add layer-specific gradient clamping during recovery
+  - [ ] Implement exploration rate boosting for repetitive patterns
+  - [ ] Design recovery verification through distribution metrics
+
+- [ ] **22.3 Add Adaptive Learning Rate Management**
+  - [ ] Create learning rate cycling based on collapse detection
+  - [ ] Implement temporary gradient scaling during recovery
+  - [ ] Add parameter-specific learning rate adjustments
+  - [ ] Build adaptive momentum management for stability
+  - [ ] Implement recovery-specific optimizer configurations
+
+- [ ] **22.4 Create Benchmark-Specific Recovery Profiles**
+  - [ ] Analyze collapse patterns across different benchmark types
+  - [ ] Build category-based recovery profiles (math, string, loop, etc.)
+  - [ ] Implement adaptive token boosting based on task keywords
+  - [ ] Create benchmark complexity assessment to guide recovery
+  - [ ] Build a recovery strategy database that grows with experience
 
 ## Priority Order
 
@@ -651,3 +729,6 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-09 (17):** Implemented several generator enhancements: Repetition Penalty (within sequence), Grammar Boost Decay, and Early Stopping (Entropy/Repetition). Configurable via `config.ini`.
 *   **2025-04-09 (18):** Transitioned vocabulary (`memory/vocab.json`) to language-agnostic abstract tokens (Task 14.1). Updated `tokenizer.py` (removed INDENT/DEDENT) and `agent_core/generator.py` (removed Python grammar/templates, added abstract grammar/templates/hint parsing). **This is a breaking change requiring model retraining (`--reset` flag).**
 *   **2025-04-10:** Implemented multi-language support (Task 19). Updated `executor.py` to support different programming languages based on task language. Created `execution_config.json` with language-specific command and file extension mappings. Modified `training_loop.py` to pass language information to the executor. Verified that the `AttemptScorer` class already had language-specific capabilities through `normalize_for_scoring` and `_evaluate_syntax` methods. Confirmed that `generator.py` was already using a language-agnostic approach for generating code. The system can now train on and execute code in various programming languages, not just Python.
+*   **2025-04-10 (2):** Started Task 16 (vLLM Integration). Created `llm_provider.py` module with `LLMProvider` class to abstract LLM calls. Implemented support for vLLM and fallback to LM Studio, configurable via new `[LLM]` section in `config.ini`. Migrated LLM calls in `TrainingReportGenerator` and `TrainingLoop` (for hints) to use the new provider. Removed old LLM call methods from `TrainingLoop`.
+*   **2025-04-10 (3):** Implemented request caching and batch interface in `LLMProvider` (Task 16.2). Added basic performance monitoring: latency measurement, token counting, request counters, and detailed logging (Task 16.4). These optimizations reduce redundant LLM calls and provide insights into LLM usage patterns.
+*   **2025-04-10 (4):** Implemented adaptive request throttling in `LLMProvider` based on average latency (Task 16.4). If average latency exceeds a configurable threshold, the provider delays new requests to avoid overloading the LLM server.

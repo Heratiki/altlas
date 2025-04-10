@@ -4,6 +4,7 @@ Implements periodic reporting to track training progress and identify improvemen
 """
 
 import os
+from llm_provider import LLMProvider
 import logging
 import difflib
 import json
@@ -25,8 +26,9 @@ from typing import Dict, List, Any, Optional, Tuple
 DEFAULT_PLACEHOLDER = "N/A"
 
 class TrainingReportGenerator:
-    def __init__(self, report_dir="memory/reports", template_path="training_report.md"):
+    def __init__(self, report_dir="memory/reports", template_path="training_report.md", llm_config=None):
         try:
+            self.llm_provider = LLMProvider(config=llm_config)
             self.report_dir = Path(report_dir).resolve() # Resolve path immediately
             # Resolve template path relative to project root (parent of this file's parent)
             project_root = Path(__file__).parent.parent.resolve()
@@ -383,85 +385,6 @@ class TrainingReportGenerator:
 
         return insights
 
-    def _call_local_llm(self, prompt: str) -> str:
-        """
-        Call a local LLM using LM Studio running on localhost to generate insights.
-        
-        Args:
-            prompt (str): The prompt to send to the LM Studio API
-            
-        Returns:
-            str: The generated text or a default message if the call fails
-        """
-        import requests
-        import json
-        import logging
-        
-        try:
-            base_url = "http://localhost:1234/v1"
-            logging.info("🌐 Attempting to connect to LM Studio on localhost:1234")
-            
-            headers = {"Content-Type": "application/json"}
-            chosen_model = None
-            
-            # First check if LM Studio is available and get available models
-            try:
-                models_response = requests.get(f"{base_url}/models", headers=headers, timeout=5)
-                if models_response.status_code == 200:
-                    models_data = models_response.json()
-                    available_models = [model["id"] for model in models_data.get("data", [])]
-                    logging.info(f"🤖 Available LM Studio models: {available_models}")
-                    
-                    # Prefer coding-specific models
-                    preferred_models = ["wizardcoder", "codellama", "code-llama", "stable-code", "starcoder", "llama"]
-                    for preferred in preferred_models:
-                        for model in available_models:
-                            if preferred.lower() in model.lower():
-                                chosen_model = model
-                                break
-                        if chosen_model: break
-                    
-                    if not chosen_model and available_models:
-                        chosen_model = available_models[0]
-                    
-                    if chosen_model:
-                        logging.info(f"🧠 Using LM Studio model: {chosen_model}")
-                    else:
-                        logging.warning("⚠️ No models available in LM Studio")
-                        return "No LM Studio models available to generate observations."
-                else:
-                    logging.warning(f"⚠️ Failed to retrieve models from LM Studio: {models_response.status_code}")
-                    return "Could not connect to LM Studio API."
-            except Exception as model_e:
-                logging.warning(f"⚠️ Error querying available models: {str(model_e)}")
-                return "Error connecting to LM Studio: " + str(model_e)
-                
-            # Proceed with API call
-            data = {
-                "messages": [
-                    {"role": "system", "content": "You are an AI assistant specializing in code generation and reinforcement learning analysis. Provide insightful observations about training reports."},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 500,
-                "temperature": 0.7
-            }
-            if chosen_model:
-                data["model"] = chosen_model
-            
-            logging.info(f"Sending prompt to LM Studio model {chosen_model}")
-            response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(data), timeout=120) # Increased timeout to 45s
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                generated_text = response_data['choices'][0]['message']['content'].strip()
-                return generated_text
-            else:
-                logging.warning(f"⚠️ LM Studio API error: {response.status_code} - {response.text}")
-                return f"LM Studio API error (HTTP {response.status_code})"
-                
-        except Exception as e:
-            logging.warning(f"⚠️ Error calling local LLM: {str(e)}")
-            return f"Error generating LLM observations: {str(e)}"
 
     def add_llm_observations(self, report_data: dict, history: list, current_task) -> str:
         """
@@ -515,7 +438,7 @@ Based on this data, please provide:
 Format your response with clear section headers and bullet points where appropriate.
 """
         # Call the local LLM for analysis
-        observations = self._call_local_llm(prompt)
+        observations = self.llm_provider.generate(prompt)
         
         # If observations were generated successfully
         if observations and not observations.startswith("Error"):

@@ -14,6 +14,7 @@ import collections # Added for deque
 import statistics # Added for mean/stdev
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+from llm_provider import LLMProvider
 
 # Import necessary components (adjust paths as needed)
 from agent_core.generator import CodeGenerator
@@ -68,6 +69,10 @@ class TrainingLoop:
         self.report_generator = report_generator
         self.current_task = current_task
         self.device = device
+        
+        # Initialize LLM Provider
+        llm_config = self.config_loader.get_llm_config()
+        self.llm_provider = LLMProvider(config=llm_config)
         
         # Load configurations
         self.runner_config = self.config_loader.get_runner_config()
@@ -939,7 +944,7 @@ Provide ONLY the hint without explanation:
 """
             
             # Call the LLM API
-            hint = self._call_llm_api(prompt)
+            hint = self.llm_provider.generate(prompt)
             
             if hint:
                 # Post-process the hint to ensure brevity
@@ -995,120 +1000,6 @@ Provide ONLY the hint without explanation:
         
         return processed_hint
     
-    def _call_llm_api(self, prompt: str) -> Optional[str]:
-        """
-        Call an external LLM API to get a response.
-        
-        Returns:
-            str or None: The LLM's response or None if the call failed
-        """
-        # Check for API key in environment or config
-        api_key = os.environ.get('OPENAI_API_KEY')
-        
-        # If no API key, try using a local LLM via LM Studio
-        if not api_key:
-            return self._call_local_llm(prompt)
-        
-        try:
-            # OpenAI API call
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
-            }
-            
-            data = {
-                "model": "gpt-3.5-turbo",
-                "messages": [
-                    {"role": "system", "content": "You are a helpful programming advisor giving concise hints."},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 100,
-                "temperature": 0.7
-            }
-            
-            response = requests.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                data=json.dumps(data),
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                hint = response_data['choices'][0]['message']['content'].strip()
-                return hint
-            else:
-                log.error(f"API error: {response.status_code} - {response.text}")
-                return None
-                
-        except Exception as e:
-            log.error(f"Error calling LLM API: {str(e)}")
-            return None
-
-    def _call_local_llm(self, prompt: str) -> Optional[str]:
-        """
-        Call a local LLM using LM Studio running on the host machine.
-        """
-        try:
-            base_url = "http://localhost:1234/v1"
-            log.info("🌐 Using localhost with network=host to connect to LM Studio")
-            
-            headers = {"Content-Type": "application/json"}
-            chosen_model = None
-            
-            try: # Inner try for model discovery
-                models_response = requests.get(f"{base_url}/models", headers=headers, timeout=5)
-                if models_response.status_code == 200:
-                    models_data = models_response.json()
-                    available_models = [model["id"] for model in models_data.get("data", [])]
-                    log.info(f"🤖 Available LM Studio models: {available_models}")
-                    
-                    preferred_models = ["wizardcoder", "codellama", "code-llama", "stable-code", "starcoder"]
-                    for preferred in preferred_models:
-                        for model in available_models:
-                            if preferred.lower() in model.lower():
-                                chosen_model = model
-                                break
-                        if chosen_model: break
-                    
-                    if not chosen_model and available_models: chosen_model = available_models[0]
-                    
-                    if not chosen_model:
-                        log.warning("⚠️ No models available in LM Studio")
-                        return self._generate_static_hint(prompt)
-                        
-                    log.info(f"🧠 Using LM Studio model: {chosen_model}")
-                else:
-                    log.warning(f"⚠️ Failed to retrieve models from LM Studio: {models_response.status_code} - {models_response.text}")
-                    return self._generate_static_hint(prompt)
-            except Exception as model_e: # Added except block for inner try
-                log.warning(f"⚠️ Error querying available models: {str(model_e)}")
-                return self._generate_static_hint(prompt)
-                
-            # Proceed with API call only if model discovery didn't fail early
-            data = {
-                "messages": [
-                    {"role": "system", "content": "You are a helpful programming advisor giving concise hints."},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 100,
-                "temperature": 0.7
-            }
-            if chosen_model: data["model"] = chosen_model
-            
-            response = requests.post(f"{base_url}/chat/completions", headers=headers, data=json.dumps(data), timeout=10)
-            
-            if response.status_code == 200:
-                response_data = response.json()
-                hint = response_data['choices'][0]['message']['content'].strip()
-                return hint
-            else:
-                log.warning(f"⚠️ Local LLM API error: {response.status_code} - {response.text}")
-                return self._generate_static_hint(prompt)
-                
-        except Exception as e: # Added except block for outer try
-            log.warning(f"⚠️ Error calling local LLM: {str(e)}")
-            return self._generate_static_hint(prompt)
 
     def _monitor_training_stability(self, current_grad_norm: Optional[float]):
         """Monitor gradient norms for potential instability."""

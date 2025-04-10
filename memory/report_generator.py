@@ -546,6 +546,9 @@ Format your response with clear section headers and bullet points where appropri
                 logging.info(f"New all-time best score achieved: {metrics['high_score']:.4f}")
 
             # --- Prepare Data Dictionary for Template ---
+            # --- Fetch LLM Provider Stats ---
+            llm_stats = self.llm_provider.get_stats() if self.llm_provider else {}
+
             report_data = {
                 'timestamp': timestamp_str,
                 'session_id': session_id,
@@ -560,6 +563,25 @@ Format your response with clear section headers and bullet points where appropri
                 'learning_rate': generator_state.get('current_learning_rate', DEFAULT_PLACEHOLDER),
                 'entropy_coefficient': generator_state.get('max_entropy_coefficient', DEFAULT_PLACEHOLDER),
 
+                # LLM Provider Stats
+                'llm_total_requests': llm_stats.get('total_requests', DEFAULT_PLACEHOLDER),
+                'llm_failed_requests': llm_stats.get('failed_requests', DEFAULT_PLACEHOLDER),
+                'llm_avg_latency': f"{llm_stats.get('avg_latency_seconds', 0.0):.3f}s",
+                'llm_avg_recent_latency': f"{llm_stats.get('avg_recent_latency_seconds', 0.0):.3f}s ({llm_stats.get('recent_latency_count', 0)} reqs)",
+                'llm_total_prompt_tokens': llm_stats.get('total_prompt_tokens', DEFAULT_PLACEHOLDER),
+                'llm_total_response_tokens': llm_stats.get('total_response_tokens', DEFAULT_PLACEHOLDER),
+                'llm_total_tokens': llm_stats.get('total_tokens', DEFAULT_PLACEHOLDER),
+                'llm_avg_prompt_tokens': f"{llm_stats.get('total_prompt_tokens', 0) / llm_stats.get('total_requests', 1):.1f}" if llm_stats.get('total_requests', 0) > 0 else DEFAULT_PLACEHOLDER,
+                'llm_avg_response_tokens': f"{llm_stats.get('total_response_tokens', 0) / llm_stats.get('total_requests', 1):.1f}" if llm_stats.get('total_requests', 0) > 0 else DEFAULT_PLACEHOLDER,
+                'llm_cache_hit_rate': f"{llm_stats.get('cache_hit_rate', 0.0) * 100:.1f}% ({llm_stats.get('cache_hits', 0)} hits)",
+                'llm_cache_miss_rate': f"{llm_stats.get('cache_miss_rate', 0.0) * 100:.1f}% ({llm_stats.get('cache_misses', 0)} misses)",
+                'llm_cache_size': f"{llm_stats.get('cache_size', 0)} / {llm_stats.get('cache_capacity', 0)}",
+                'llm_single_requests': llm_stats.get('single_requests_processed', DEFAULT_PLACEHOLDER),
+                'llm_batched_requests': llm_stats.get('batched_requests_processed', DEFAULT_PLACEHOLDER),
+                'llm_batches_processed': llm_stats.get('batches_processed', DEFAULT_PLACEHOLDER),
+                'llm_async_queue_max': llm_stats.get('async_queue_max_observed_length', DEFAULT_PLACEHOLDER),
+                'llm_batching_enabled': llm_stats.get('batching_enabled', False),
+                'llm_async_enabled': llm_stats.get('async_enabled', False),
                 # Use all-time bests if better than current
                 'high_score': max(metrics['high_score'], self.metrics_state.get('all_time_high_score', 0.0)),
                 'highest_scoring_code': (metrics['high_scoring_code'] 

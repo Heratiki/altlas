@@ -95,6 +95,30 @@ Last updated: {TIMESTAMP}
 | Constraints | {CONSTRAINTS_WEIGHT} | {CONSTRAINTS_SCORE} |
 | Semantic | {SEMANTIC_WEIGHT} | {SEMANTIC_SCORE} |
 
+## LLM Provider Performance
+
+| Metric                     | Value                       |
+|----------------------------|-----------------------------|
+| Total Requests             | {LLM_TOTAL_REQUESTS}        |
+| Failed Requests            | {LLM_FAILED_REQUESTS}       |
+| Avg Latency (Overall)    | {LLM_AVG_LATENCY}           |
+| Avg Latency (Recent)     | {LLM_AVG_RECENT_LATENCY}    |
+| Total Prompt Tokens        | {LLM_TOTAL_PROMPT_TOKENS}   |
+| Total Response Tokens      | {LLM_TOTAL_RESPONSE_TOKENS} |
+| Total Tokens               | {LLM_TOTAL_TOKENS}          |
+| Avg Prompt Tokens/Req    | {LLM_AVG_PROMPT_TOKENS}     |
+| Avg Response Tokens/Req  | {LLM_AVG_RESPONSE_TOKENS}   |
+| Cache Hit Rate           | {LLM_CACHE_HIT_RATE}        |
+| Cache Miss Rate          | {LLM_CACHE_MISS_RATE}       |
+| Cache Size (Current/Cap) | {LLM_CACHE_SIZE}            |
+| Single Requests Processed  | {LLM_SINGLE_REQUESTS}       |
+| Batched Requests Processed | {LLM_BATCHED_REQUESTS}      |
+| Batches Processed          | {LLM_BATCHES_PROCESSED}     |
+| Async Queue Max Observed   | {LLM_ASYNC_QUEUE_MAX}       |
+| Batching Enabled           | {LLM_BATCHING_ENABLED}      |
+| Async Enabled              | {LLM_ASYNC_ENABLED}         |
+
+
 ## Resource Utilization
 
 - **Memory Usage**: {MEMORY_USAGE}

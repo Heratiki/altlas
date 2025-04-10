@@ -208,7 +208,7 @@ class TrainingLoop:
                         is_duplicate = self.attempt_manager.is_duplicate(fingerprint)
                         
                         # --- Execute Code --- 
-                        result = self.executor.execute(code_attempt)
+                        result = self.executor.execute(code_attempt, language=self.current_task.target_language)
                         
                         # --- Score Result --- 
                         score = self.scorer.score(code_attempt, result, self.current_task)

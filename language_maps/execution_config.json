@@ -1,0 +1,79 @@
+{
+    "command_map": {
+        "python": [
+            "python"
+        ],
+        "javascript": [
+            "node"
+        ],
+        "js": [
+            "node"
+        ],
+        "typescript": [
+            "ts-node"
+        ],
+        "ts": [
+            "ts-node"
+        ],
+        "ruby": [
+            "ruby"
+        ],
+        "php": [
+            "php"
+        ],
+        "go": [
+            "go",
+            "run"
+        ],
+        "java": [
+            "java"
+        ],
+        "c": [
+            "gcc",
+            "-o",
+            "temp_executable"
+        ],
+        "cpp": [
+            "g++",
+            "-o",
+            "temp_executable"
+        ],
+        "csharp": [
+            "dotnet",
+            "run"
+        ],
+        "cs": [
+            "dotnet",
+            "run"
+        ],
+        "rust": [
+            "rustc",
+            "-o",
+            "temp_executable"
+        ],
+        "kotlin": [
+            "kotlinc"
+        ],
+        "swift": [
+            "swift"
+        ]
+    },
+    "extension_map": {
+        "python": ".py",
+        "javascript": ".js",
+        "js": ".js",
+        "typescript": ".ts",
+        "ts": ".ts",
+        "ruby": ".rb",
+        "php": ".php",
+        "go": ".go",
+        "java": ".java",
+        "c": ".c",
+        "cpp": ".cpp",
+        "csharp": ".cs",
+        "cs": ".cs",
+        "rust": ".rs",
+        "kotlin": ".kt",
+        "swift": ".swift"
+    }
+}

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import time
 import configparser
 from pathlib import Path
+import logging
+import json
 
 @dataclass
 class ExecutionResult:
@@ -32,38 +34,83 @@ class CodeExecutor:
         exec_config = config['Executor']
         self.timeout = exec_config.getint('Timeout', 5)
         
-    def execute(self, code):
+        # Initialize language-specific command maps
+        self._language_command_map = {
+            "python": ["python"],
+            "javascript": ["node"],
+            "js": ["node"],  # Alias for javascript
+            # Add other languages as needed
+        }
+        
+        # Initialize language-specific file extensions
+        self._language_extension_map = {
+            "python": ".py",
+            "javascript": ".js",
+            "js": ".js",  # Alias for javascript
+            # Add other languages as needed
+        }
+        
+        # Load custom language maps if available
+        self._load_language_maps()
+    
+    def _load_language_maps(self):
+        """Load language-specific command and extension maps from config if available."""
+        language_map_path = Path(__file__).parent.parent / "language_maps" / "execution_config.json"
+        
+        if language_map_path.exists():
+            try:
+                with open(language_map_path, 'r') as f:
+                    execution_config = json.load(f)
+                    
+                # Update command and extension maps with values from config
+                if 'command_map' in execution_config:
+                    self._language_command_map.update(execution_config['command_map'])
+                    
+                if 'extension_map' in execution_config:
+                    self._language_extension_map.update(execution_config['extension_map'])
+                    
+                logging.info(f"Loaded language execution configuration from {language_map_path}")
+            except Exception as e:
+                logging.error(f"Error loading language execution configuration: {e}")
+        
+    def execute(self, code, language="python"):
         """Execute the provided code and return the results.
         
         Args:
-            code (str): The Python code to execute.
+            code (str): The code to execute.
+            language (str): The programming language of the code (e.g., "python", "javascript").
+                           Defaults to "python" for backward compatibility.
             
         Returns:
             ExecutionResult: The results of the execution.
         """
-        # Create a temporary file for the code
-        with tempfile.NamedTemporaryFile(suffix='.py', delete=False) as temp_file:
+        # Normalize language name to lowercase
+        language = language.lower()
+        
+        # Get the appropriate file extension for the language
+        file_extension = self._language_extension_map.get(language, ".txt")
+        
+        # Get the appropriate command for the language
+        command = self._language_command_map.get(language)
+        
+        # If language not supported, log an error and fall back to Python
+        if not command:
+            logging.error(f"Unsupported language: {language}. Falling back to Python.")
+            language = "python"
+            file_extension = ".py"
+            command = ["python"]
+        
+        # Create a temporary file for the code with the appropriate extension
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
             temp_file.write(code.encode('utf-8'))
             temp_path = temp_file.name
         
         start_time = time.time()
         
         try:
-            # Execute the code in a subprocess
-            # FUTURE INTENT: The execution environment needs careful consideration for safety and consistency.
-            # 1.  Enhanced Sandboxing: While using a subprocess is a start, true sandboxing might involve:
-            #     - Running inside dedicated, minimal Docker containers per execution.
-            #     - Using technologies like `nsjail` or `firecracker` for stronger isolation.
-            #     - Applying resource limits (CPU, memory, time, network access, filesystem visibility)
-            #       more granularly than just a simple timeout.
-            # 2.  Environment Consistency: Ensure the execution environment is identical across all runs
-            #     and matches the target environment if the agent is intended to produce code for a specific platform.
-            # 3.  State Management: For tasks requiring state across multiple executions (e.g., interacting
-            #     with a simulated API or filesystem), the executor needs to manage this state safely.
-            # 4.  Observability: Potentially capture more detailed execution traces (e.g., using `sys.settrace`
-            #     or external tools) if needed for advanced scoring or debugging, while being mindful of overhead.
+            # Execute the code in a subprocess with the appropriate command
             process = subprocess.Popen(
-                ['python', temp_path],
+                command + [temp_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True

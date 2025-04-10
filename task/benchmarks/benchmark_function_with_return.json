@@ -1,6 +1,7 @@
 {
     "name": "benchmark_function_with_return",
     "description": "Benchmark task: Generate code that defines a function to calculate the average of two numbers and then uses it to calculate the average of 10 and 20.",
+    "target_language": "python",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "15.0",

@@ -1,6 +1,7 @@
 {
     "name": "benchmark_basic_loop",
     "description": "Benchmark task: Generate code that uses a loop to print the sum of numbers from 1 to 5.",
+    "target_language": "python",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "15",

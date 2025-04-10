@@ -482,6 +482,51 @@ Each task below should be completed while preserving existing functionality. Tas
   - [ ] Benchmark performance gains and overhead of the parallel implementation.
   - [ ] Analyze resource utilization (CPU, memory) under parallel load.
 
+### 19. Multi-Language Support with Language Maps [NEW, PLANNED]
+
+**Goal**: Implement language-agnostic code normalization and multi-language support through a dynamic mapping system.
+
+- [ ] **19.1 Create Language Mapping Directory Structure**
+  - [ ] Create `/workspaces/altlas/language_maps/` directory
+  - [ ] Implement `python.json` with mappings from abstract tokens to Python syntax
+  - [ ] Create `default.json` as a fallback mapping
+  - [ ] Add initial support for JavaScript with `javascript.json`
+  - [ ] Document mapping format and conventions
+
+- [ ] **19.2 Update Task Definition Format**
+  - [ ] Add `target_language` field to task JSON schema (e.g., "python", "javascript", "cpp")
+  - [ ] Update `TaskLoader` to parse the `target_language` field
+  - [ ] Ensure backward compatibility for tasks without the field (default to "python")
+  - [ ] Add validation for supported language values
+  - [ ] Update existing benchmark tasks with explicit `target_language` field
+
+- [ ] **19.3 Enhance AttemptScorer to Support Multiple Languages**
+  - [ ] Add `load_language_map(language_name)` method to dynamically load appropriate mappings
+  - [ ] Implement caching to avoid reloading maps repeatedly
+  - [ ] Modify `normalize_for_scoring` to use language-specific mappings
+  - [ ] Update method signatures to accept task object with language information
+  - [ ] Create fallback mechanisms for unsupported languages
+
+- [ ] **19.4 Make Syntax Checking Language-Aware**
+  - [ ] Update `_evaluate_syntax` to conditionally use language-specific validation
+  - [ ] Keep `ast.parse()` for Python code validation
+  - [ ] Implement neutral scoring (e.g., 0.1) for other languages without specific validators
+  - [ ] Design pluggable architecture for adding language-specific syntax validators
+  - [ ] Document the syntax validation logic and extension points
+
+- [ ] **19.5 Update Generator and Tokenizer**
+  - [ ] Ensure `generator.py` properly handles abstract tokens for all languages
+  - [ ] Review template generation to support language-agnostic patterns
+  - [ ] Update any language-specific logic in the tokenizer
+  - [ ] Test token distribution monitoring with multi-language support
+  - [ ] Add language-specific grammar rules (where applicable)
+
+- [ ] **19.6 Testing and Validation**
+  - [ ] Create multi-language benchmark tasks (starting with Python and JavaScript)
+  - [ ] Implement tests to verify correct normalization across languages
+  - [ ] Validate training performance on non-Python tasks
+  - [ ] Measure and optimize any performance impact from dynamic language loading
+  - [ ] Document language support status and limitations
 
 ## Priority Order
 
@@ -520,6 +565,11 @@ Each task below should be completed while preserving existing functionality. Tas
 8. **Eighth Priority: vLLM Integration (16.1, 16.2)**
    - Replace OPENAI/LM Studio with vLLM for better performance and control
    - Implement request optimization to reduce costs and improve throughput
+
+9. **Ninth Priority: Multi-Language Support (19.1, 19.2, 19.3)**
+   - Implement language mapping system for language-agnostic code generation
+   - Add JavaScript as second supported language
+   - Make syntax checking language-aware
 
 ## Tracking Progress
 

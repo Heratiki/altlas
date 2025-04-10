@@ -1,46 +1,47 @@
 {
-    "name": "benchmark_add_two_numbers",
-    "description": "Benchmark task: Generate code that prints the sum of 5 and 3.",
-    "target_language": "python",
+    "name": "benchmark_js_add_two_numbers",
+    "description": "Benchmark task: Generate JavaScript code that prints the sum of 5 and 3.",
+    "target_language": "javascript",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "8",
         "valid_patterns": [
             {
                 "type": "direct_addition",
-                "pattern": "print(5+3)",
+                "pattern": "console.log(5+3)",
                 "variations": [
-                    "print(3+5)",
-                    "print(5 + 3)",
-                    "print(3 + 5)"
+                    "console.log(3+5)",
+                    "console.log(5 + 3)",
+                    "console.log(3 + 5)"
                 ]
             },
             {
                 "type": "variable_addition",
                 "pattern": [
-                    "x=5",
-                    "y=3",
-                    "print(x+y)"
+                    "let x=5;",
+                    "let y=3;",
+                    "console.log(x+y);"
                 ],
                 "variations": [
                     [
-                        "a=5",
-                        "b=3",
-                        "print(a+b)"
+                        "const a=5;",
+                        "const b=3;",
+                        "console.log(a+b);"
                     ],
                     [
-                        "num1=5",
-                        "num2=3",
-                        "print(num1+num2)"
+                        "var num1=5;",
+                        "var num2=3;",
+                        "console.log(num1+num2);"
                     ]
                 ]
             },
             {
                 "type": "sum_function",
                 "pattern": [
-                    "def sum(a,b):",
-                    "    return a+b",
-                    "print(sum(5,3))"
+                    "function sum(a,b) {",
+                    "    return a+b;",
+                    "}",
+                    "console.log(sum(5,3));"
                 ]
             }
         ],
@@ -55,7 +56,7 @@
             5,
             3
         ],
-        "max_tokens": 20
+        "max_tokens": 25
     },
     "difficulty": "beginner"
 }

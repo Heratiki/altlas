@@ -8,6 +8,8 @@ import difflib
 import ast
 import logging
 import re
+import json
+import os
 from typing import Dict, Optional, List, Union, Any
 
 from reinforcer.tool_feedback import ToolFeedback
@@ -28,20 +30,127 @@ class AttemptScorer:
         # No scorer-specific config needed for now
         # scorer_config = config['Scorer']
         
-    def normalize_for_scoring(self, decoded_code: str) -> str:
-        """Replaces abstract token representations with concrete literals for scoring."""
-        # TODO: Consider making these replacements configurable or loading from vocab
-        replacements = {
-            "VAR_GENERIC": "x",
-            "NUMBER_LITERAL_PLACEHOLDER": "3",
-            "FUNC_GENERIC": "my_function",
+        # Initialize language maps cache
+        self._language_maps_cache = {}
+        self._language_maps_dir = Path(__file__).parent.parent / "language_maps"
+        if not self._language_maps_dir.exists():
+            logging.warning(f"Language maps directory not found at {self._language_maps_dir}")
+            # Create the directory if it doesn't exist
+            os.makedirs(self._language_maps_dir, exist_ok=True)
+    
+    def load_language_map(self, language_name: str) -> Dict[str, str]:
+        """
+        Load a language-specific mapping file.
+        
+        Args:
+            language_name (str): The name of the language to load the map for
+                                (e.g., "python", "javascript")
+                                
+        Returns:
+            Dict[str, str]: Mapping from abstract tokens to language-specific tokens
+        """
+        # Check if already cached
+        if language_name in self._language_maps_cache:
+            return self._language_maps_cache[language_name]
+        
+        # Try to load the language-specific map
+        language_map_path = self._language_maps_dir / f"{language_name}.json"
+        default_map_path = self._language_maps_dir / "default.json"
+        
+        try:
+            if language_map_path.exists():
+                with open(language_map_path, 'r') as f:
+                    language_map = json.load(f)
+                    logging.info(f"Loaded language map for '{language_name}'")
+            elif default_map_path.exists():
+                # Fall back to default.json if language-specific map doesn't exist
+                with open(default_map_path, 'r') as f:
+                    language_map = json.load(f)
+                    logging.warning(f"Language map for '{language_name}' not found. Using default map.")
+            else:
+                # Fall back to hardcoded defaults if no map files exist
+                logging.warning(f"No language maps found. Using hardcoded default mappings.")
+                language_map = self._get_default_fallback_map()
+            
+            # Cache the loaded map
+            self._language_maps_cache[language_name] = language_map
+            return language_map
+            
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing language map for '{language_name}': {e}")
+            # Fall back to hardcoded defaults on error
+            language_map = self._get_default_fallback_map()
+            self._language_maps_cache[language_name] = language_map
+            return language_map
+        except Exception as e:
+            logging.error(f"Unexpected error loading language map for '{language_name}': {e}")
+            # Fall back to hardcoded defaults on error
+            language_map = self._get_default_fallback_map()
+            self._language_maps_cache[language_name] = language_map
+            return language_map
+
+    def _get_default_fallback_map(self) -> Dict[str, str]:
+        """Return a hardcoded default mapping as a last resort fallback."""
+        return {
+            # Core Operations / Keywords
+            "OUTPUT_OP": "print",
+            "CONDITIONAL_IF": "if",
+            "CONDITIONAL_ELSE": "else",
+            "LOOP_FOR": "for",
+            "LOOP_WHILE": "while",
             "FUNC_DEF": "def",
             "RETURN_STMT": "return",
-            # Add more abstract tokens and their representative literals as needed
-            # e.g., "STRING_LITERAL_PLACEHOLDER": "'abc'",
-            #       "CLASS_DEF": "class",
-            #       "IMPORT_STMT": "import",
+            "PASS_STMT": "pass",
+
+            # Operators
+            "=": "=",
+            "+": "+",
+            "-": "-",
+            "*": "*",
+            "/": "/",
+            "COMP_EQ": "==",
+            "COMP_NEQ": "!=",
+            "<": "<",
+            ">": ">",
+            "COMP_LTE": "<=",
+            "COMP_GTE": ">=",
+            "ASSIGN_ADD": "+=",
+            "ASSIGN_SUB": "-=",
+
+            # Literals
+            "BOOL_TRUE": "True",
+            "BOOL_FALSE": "False",
+            "NULL_VALUE": "None",
+            "NUMBER_LITERAL_PLACEHOLDER": "0",
+            "STRING_LITERAL_PLACEHOLDER": '""',
+
+            # Generic Identifiers
+            "VAR_GENERIC": "var",
+            "FUNC_GENERIC": "func",
+
+            # Newline
+            "\\n": "\n"
         }
+
+    def normalize_for_scoring(self, decoded_code: str, task=None) -> str:
+        """
+        Replaces abstract token representations with concrete literals for scoring,
+        using language-specific mappings based on the task's target language.
+        
+        Args:
+            decoded_code (str): The code to normalize
+            task (Task, optional): The task object, which may specify target_language
+            
+        Returns:
+            str: Normalized code for scoring
+        """
+        # Determine the target language
+        target_language = "python"  # Default to Python for backward compatibility
+        if task and hasattr(task, 'target_language'):
+            target_language = task.target_language
+            
+        # Load the appropriate language map
+        replacements = self.load_language_map(target_language)
         
         normalized_code = decoded_code
         # Use regex to replace whole words only to avoid partial matches (e.g., VAR_GENERIC_2)
@@ -50,7 +159,6 @@ class AttemptScorer:
             normalized_code = re.sub(r'\b' + re.escape(abstract) + r'\b', literal, normalized_code)
             
         return normalized_code
-
 
     def score(self, code_attempt: str, result, task) -> float:
         """Score the execution result against the task's success criteria,
@@ -70,7 +178,7 @@ class AttemptScorer:
         
         # Initialize various scoring components
         scores = {
-            'syntax': self._evaluate_syntax(code_attempt),
+            'syntax': self._evaluate_syntax(code_attempt, task),
             'execution': self._evaluate_execution(result, feedback_type),
             'output': self._evaluate_output_match(result, task),
             'structural': self._evaluate_structural_match(code_attempt, task),
@@ -98,20 +206,38 @@ class AttemptScorer:
         logging.debug(f"Scorer: Final score: {final_score:.2f}, Feedback type: {feedback_type}")
         return final_score
     
-    def _evaluate_syntax(self, code_attempt: str) -> float:
-        """Evaluate the syntactic validity of the code after normalization."""
-        # TODO: Track normalization dependency for future vocab changes
-        normalized_attempt = self.normalize_for_scoring(code_attempt)
-        try:
-            ast.parse(normalized_attempt)
-            # Give a moderate score for valid syntax
-            return 0.25
-        except SyntaxError:
-            logging.debug("Scorer: Syntax check failed (SyntaxError)")
-            return 0.05
-        except Exception as e:
-            logging.warning(f"Scorer: Syntax check failed ({type(e).__name__})")
-            return 0.05
+    def _evaluate_syntax(self, code_attempt: str, task=None) -> float:
+        """
+        Evaluate the syntactic validity of the code after normalization.
+        
+        The validation method depends on the task's target language:
+        - For Python, uses ast.parse()
+        - For other languages, returns a neutral score (syntax validation not implemented)
+        """
+        # Determine the target language
+        target_language = "python"  # Default to Python for backward compatibility
+        if task and hasattr(task, 'target_language'):
+            target_language = task.target_language
+        
+        # Normalize the code using the appropriate language map
+        normalized_attempt = self.normalize_for_scoring(code_attempt, task)
+        
+        # Choose validation method based on language
+        if target_language.lower() == "python":
+            try:
+                ast.parse(normalized_attempt)
+                # Give a moderate score for valid syntax
+                return 0.25
+            except SyntaxError:
+                logging.debug("Scorer: Python syntax check failed (SyntaxError)")
+                return 0.05
+            except Exception as e:
+                logging.warning(f"Scorer: Python syntax check failed ({type(e).__name__})")
+                return 0.05
+        else:
+            # For non-Python languages, return a neutral score (0.1) since we can't validate syntax
+            logging.debug(f"Scorer: Syntax check for {target_language} not implemented. Using neutral score.")
+            return 0.1
     
     def _evaluate_execution(self, result, feedback_type: str) -> float:
         """Evaluate the execution outcome based on feedback type."""
@@ -159,14 +285,13 @@ class AttemptScorer:
     
     def _evaluate_output_match(self, result, task) -> float:
         """Evaluate how well the normalized output matches the expected output."""
-        # TODO: Track normalization dependency for future vocab changes
         # Default score if no expected output
         if 'success_criteria' not in task.__dict__ or 'expected_output' not in task.success_criteria:
             return 0.0
 
         expected_output = task.success_criteria.get('expected_output', '').strip()
-        # Normalize the actual output before comparing
-        actual_output = self.normalize_for_scoring(result.stdout.strip())
+        # Normalize the actual output using task-specific language map
+        actual_output = self.normalize_for_scoring(result.stdout.strip(), task)
         
         if not expected_output:  # No expected output defined
             return 0.0
@@ -216,12 +341,11 @@ class AttemptScorer:
     
     def _check_exact_pattern_match(self, code_attempt: str, task) -> bool:
         """Check if normalized code exactly matches any of the valid patterns."""
-        # TODO: Track normalization dependency for future vocab changes
         if 'valid_patterns' not in task.success_criteria:
             return False
 
-        # First, normalize abstract tokens, then normalize whitespace/case
-        normalized_for_scoring = self.normalize_for_scoring(code_attempt)
+        # First, normalize abstract tokens using task-specific language map, then normalize whitespace/case
+        normalized_for_scoring = self.normalize_for_scoring(code_attempt, task)
         normalized_attempt = self._normalize_code(normalized_for_scoring, task)
         
         for pattern_group in task.success_criteria['valid_patterns']:
@@ -269,12 +393,12 @@ class AttemptScorer:
         pattern = pattern_group.get('pattern', '')
         normalized_pattern = self._normalize_pattern(pattern, task)
         return normalized_code == normalized_pattern
+    
     def _calculate_pattern_similarity(self, code_attempt: str, task) -> float:
         """Calculate similarity between normalized code and valid patterns."""
-        # TODO: Track normalization dependency for future vocab changes
         max_similarity = 0.0
-        # First, normalize abstract tokens, then normalize whitespace/case
-        normalized_for_scoring = self.normalize_for_scoring(code_attempt)
+        # First, normalize abstract tokens using task-specific language map, then normalize whitespace/case
+        normalized_for_scoring = self.normalize_for_scoring(code_attempt, task)
         normalized_attempt = self._normalize_code(normalized_for_scoring, task)
 
         
@@ -301,8 +425,7 @@ class AttemptScorer:
     
     def _evaluate_constraints(self, code_attempt: str, task) -> float:
         """Evaluate if normalized code meets task-specific constraints."""
-        # TODO: Track normalization dependency for future vocab changes
-        normalized_attempt = self.normalize_for_scoring(code_attempt)
+        normalized_attempt = self.normalize_for_scoring(code_attempt, task)
         constraints = getattr(task, 'constraints', {})
         if not constraints:
             return 0.0
@@ -342,8 +465,7 @@ class AttemptScorer:
         Evaluate semantic similarity of the normalized code to the task requirements.
         This looks at deeper meaning rather than just surface patterns.
         """
-        # TODO: Track normalization dependency for future vocab changes
-        normalized_attempt = self.normalize_for_scoring(code_attempt)
+        normalized_attempt = self.normalize_for_scoring(code_attempt, task)
         # Initialize semantic score
         semantic_score = 0.0
 
@@ -376,35 +498,37 @@ class AttemptScorer:
                     semantic_score += 0.2
         
         # Look at AST structure of normalized code to evaluate if it has the right elements
-        try:
-            tree = ast.parse(normalized_attempt)
-            
-            # Check for specific AST node types that might be required
-            # This is a generic check that can be enhanced for specific tasks
-            has_function_def = any(isinstance(node, ast.FunctionDef) for node in ast.walk(tree))
-            has_class_def = any(isinstance(node, ast.ClassDef) for node in ast.walk(tree))
-            has_control_flow = any(isinstance(node, (ast.If, ast.For, ast.While)) for node in ast.walk(tree))
-            
-            # Award points for having appropriate code structures
-            if 'success_criteria' in task.__dict__ and 'required_structures' in task.success_criteria:
-                required = task.success_criteria['required_structures']
-                if 'function' in required and has_function_def:
-                    semantic_score += 0.1
-                if 'class' in required and has_class_def:
-                    semantic_score += 0.1
-                if 'control_flow' in required and has_control_flow:
-                    semantic_score += 0.1
-            else:
-                # Generic scoring if no specific requirements
-                if has_function_def:
-                    semantic_score += 0.05
-                if has_class_def:
-                    semantic_score += 0.05
-                if has_control_flow:
-                    semantic_score += 0.05
-        except:
-            # If code can't be parsed, no semantic points
-            pass
+        # This is language-specific, so only do it for Python
+        if task and hasattr(task, 'target_language') and task.target_language.lower() == "python":
+            try:
+                tree = ast.parse(normalized_attempt)
+                
+                # Check for specific AST node types that might be required
+                # This is a generic check that can be enhanced for specific tasks
+                has_function_def = any(isinstance(node, ast.FunctionDef) for node in ast.walk(tree))
+                has_class_def = any(isinstance(node, ast.ClassDef) for node in ast.walk(tree))
+                has_control_flow = any(isinstance(node, (ast.If, ast.For, ast.While)) for node in ast.walk(tree))
+                
+                # Award points for having appropriate code structures
+                if 'success_criteria' in task.__dict__ and 'required_structures' in task.success_criteria:
+                    required = task.success_criteria['required_structures']
+                    if 'function' in required and has_function_def:
+                        semantic_score += 0.1
+                    if 'class' in required and has_class_def:
+                        semantic_score += 0.1
+                    if 'control_flow' in required and has_control_flow:
+                        semantic_score += 0.1
+                else:
+                    # Generic scoring if no specific requirements
+                    if has_function_def:
+                        semantic_score += 0.05
+                    if has_class_def:
+                        semantic_score += 0.05
+                    if has_control_flow:
+                        semantic_score += 0.05
+            except:
+                # If code can't be parsed, no semantic points from AST analysis
+                pass
         
         return min(0.5, semantic_score)  # Cap at 0.5 to leave room for output matching
     

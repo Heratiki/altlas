@@ -1,0 +1,87 @@
+{
+    "name": "benchmark_js_basic_loop",
+    "description": "Benchmark task: Generate JavaScript code that uses a loop to print the sum of numbers from 1 to 5.",
+    "target_language": "javascript",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "15",
+        "valid_patterns": [
+            {
+                "type": "for_loop",
+                "pattern": [
+                    "let sum = 0;",
+                    "for (let i = 1; i <= 5; i++) {",
+                    "    sum += i;",
+                    "}",
+                    "console.log(sum);"
+                ],
+                "variations": [
+                    [
+                        "var total = 0;",
+                        "for (var i = 1; i <= 5; i++) {",
+                        "    total += i;",
+                        "}",
+                        "console.log(total);"
+                    ],
+                    [
+                        "const result = (function() {",
+                        "    let sum = 0;",
+                        "    for (let i = 1; i <= 5; i++) {",
+                        "        sum += i;",
+                        "    }",
+                        "    return sum;",
+                        "})();",
+                        "console.log(result);"
+                    ]
+                ]
+            },
+            {
+                "type": "while_loop",
+                "pattern": [
+                    "let i = 1;",
+                    "let sum = 0;",
+                    "while (i <= 5) {",
+                    "    sum += i;",
+                    "    i++;",
+                    "}",
+                    "console.log(sum);"
+                ],
+                "variations": [
+                    [
+                        "let count = 1;",
+                        "let total = 0;",
+                        "while (count <= 5) {",
+                        "    total += count;",
+                        "    count++;",
+                        "}",
+                        "console.log(total);"
+                    ]
+                ]
+            },
+            {
+                "type": "array_reduce",
+                "pattern": "console.log(Array.from({length: 5}, (_, i) => i + 1).reduce((a, b) => a + b, 0));",
+                "variations": [
+                    "console.log([1, 2, 3, 4, 5].reduce((acc, val) => acc + val, 0));"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_operators": [
+            "+"
+        ],
+        "required_numbers": [
+            1,
+            5
+        ],
+        "required_keywords": [
+            "for",
+            "let"
+        ],
+        "max_tokens": 45
+    },
+    "difficulty": "intermediate"
+}

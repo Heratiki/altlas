@@ -1,6 +1,7 @@
 {
     "name": "benchmark_conditional_check",
     "description": "Benchmark task: Generate code that checks if a number is greater than 10, and prints either 'Greater' or 'Less or equal' depending on the result. Use the number 15 for your check.",
+    "target_language": "python",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "Greater",

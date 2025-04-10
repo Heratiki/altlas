@@ -19,6 +19,7 @@ class Task:
     description: str
     success_criteria: dict
     max_tokens: Optional[int] = None  # New field with default None
+    target_language: str = "python"  # Default to python for backward compatibility
     
     def __str__(self):
         return f"Task: {self.name} - {self.description}"
@@ -60,12 +61,17 @@ class TaskLoader:
             if task_data.get("name") != task_name:
                 logging.warning(f"Task name in file '{task_data.get('name')}' does not match requested name '{task_name}'. Using requested name.")
 
-            # Create Task object with optional max_tokens
+            # Get target_language with default to "python" for backward compatibility
+            target_language = task_data.get("target_language", "python")
+            logging.info(f"Task '{task_name}' has target language: {target_language}")
+
+            # Create Task object with optional max_tokens and target_language
             task = Task(
                 name=task_name,  # Use the requested name
                 description=task_data["description"],
                 success_criteria=task_data["success_criteria"],
-                max_tokens=task_data.get("max_tokens")  # Will be None if not specified
+                max_tokens=task_data.get("max_tokens"),  # Will be None if not specified
+                target_language=target_language
             )
             
             if task.max_tokens is not None:

@@ -1,0 +1,70 @@
+{
+    "name": "benchmark_js_concatenate_strings",
+    "description": "Benchmark task: Generate JavaScript code that concatenates the strings 'hello' and 'world' and prints the result.",
+    "target_language": "javascript",
+    "success_criteria": {
+        "type": "code_pattern",
+        "expected_output": "helloworld",
+        "valid_patterns": [
+            {
+                "type": "direct_concatenation",
+                "pattern": "console.log('hello'+'world');",
+                "variations": [
+                    "console.log(\"hello\"+\"world\");",
+                    "console.log('hello' + 'world');",
+                    "console.log(\"hello\" + \"world\");"
+                ]
+            },
+            {
+                "type": "variable_concatenation",
+                "pattern": [
+                    "const a='hello';",
+                    "const b='world';",
+                    "console.log(a+b);"
+                ],
+                "variations": [
+                    [
+                        "let s1='hello';",
+                        "let s2='world';",
+                        "console.log(s1+s2);"
+                    ],
+                    [
+                        "var first=\"hello\";",
+                        "var second=\"world\";",
+                        "console.log(first+second);"
+                    ]
+                ]
+            },
+            {
+                "type": "template_literals",
+                "pattern": "console.log(`hello${'world'}`);",
+                "variations": [
+                    "console.log(`${'hello'}world`);",
+                    "console.log(`${'hello'}${'world'}`);"
+                ]
+            },
+            {
+                "type": "join_method",
+                "pattern": "console.log(['hello','world'].join(''));",
+                "variations": [
+                    "console.log([\"hello\",\"world\"].join(\"\"));",
+                    "console.log(['hello', 'world'].join(''));",
+                    "console.log([\"hello\", \"world\"].join(\"\"));"
+                ]
+            }
+        ],
+        "case_sensitive": true,
+        "whitespace_sensitive": false
+    },
+    "constraints": {
+        "required_operators": [
+            "+"
+        ],
+        "required_strings": [
+            "hello",
+            "world"
+        ],
+        "max_tokens": 30
+    },
+    "difficulty": "beginner"
+}

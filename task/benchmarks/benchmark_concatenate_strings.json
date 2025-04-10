@@ -1,6 +1,7 @@
 {
     "name": "benchmark_concatenate_strings",
     "description": "Benchmark task: Generate code that concatenates the strings 'hello' and 'world' and prints the result.",
+    "target_language": "python",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "helloworld",

@@ -1,6 +1,7 @@
 {
     "name": "benchmark_list_operations",
     "description": "Benchmark task: Generate code that creates a list containing the numbers [1, 2, 3, 4, 5], then prints the sum of the third and fifth elements.",
+    "target_language": "python",
     "success_criteria": {
         "type": "code_pattern",
         "expected_output": "8",

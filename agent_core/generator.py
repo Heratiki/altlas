@@ -4,7 +4,7 @@ Now uses a PyTorch RNN model.
 """
 
 import random
-import json
+# import json # Removed as not used in this context
 from pathlib import Path
 import configparser
 import logging

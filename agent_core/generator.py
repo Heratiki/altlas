@@ -68,6 +68,9 @@ class CodeGenerator:
             self.token_imbalance_penalty = optimizer_config.getfloat('TokenImbalancePenalty', 0.2)
 
             self.max_gen_length = gen_config.getint('MaxGenerationLength', 50)
+            self.early_stop_entropy_threshold = gen_config.getfloat('EarlyStopEntropyThreshold', 0.0)
+            self.early_stop_repetition_window = gen_config.getint('EarlyStopRepetitionWindow', 10)
+            self.early_stop_repetition_threshold = gen_config.getint('EarlyStopRepetitionThreshold', 3)
 
             # Model Hyperparameters
             self.embedding_dim = model_config.getint('EmbeddingDim', 64)
@@ -81,7 +84,10 @@ class CodeGenerator:
             # Read minimum entropy coefficient for annealing
             self.min_entropy_coefficient = optimizer_config.getfloat('MinEntropyCoefficient', 0.001)
             self.gradient_clip_norm = optimizer_config.getfloat('GradientClipNorm', 1.0)    
-            self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1) 
+            self.baseline_ema_alpha = optimizer_config.getfloat('BaselineEMAAlpha', 0.1)
+            self.repetition_penalty = optimizer_config.getfloat('RepetitionPenalty', 1.0) # 1.0 means no penalty
+            self.initial_grammar_boost = optimizer_config.getfloat('InitialGrammarBoost', 2.0)
+            self.grammar_boost_decay = optimizer_config.getfloat('GrammarBoostDecay', 1.0) # 1.0 means no decay
             
             # Experience replay buffer configuration
             self.experience_buffer_size = optimizer_config.getint('ExperienceBufferSize', 10)
@@ -287,39 +293,110 @@ class CodeGenerator:
             logging.error(f"Error loading model/optimizer state: {e}. Starting with fresh state.")
 
     def _parse_hint(self, hint: str) -> set:
-        """Parses a hint string to find relevant token IDs from the vocabulary."""
+        """
+        Parses a hint string to find relevant token IDs from the vocabulary.
+        Maps common instruction words to abstract tokens.
+        """
         if not hint:
             return set()
 
         hinted_token_ids = set()
+        hint_lower = hint.lower()
         # Simple word extraction (lowercase)
-        hint_words = set(word.strip('.,!?"\'`)') for word in hint.lower().split())
+        hint_words = set(word.strip('.,!?"\'`') for word in hint_lower.split())
 
+        # Mapping from common hint words/concepts to abstract tokens
+        agnostic_hint_map = {
+            "output": "OUTPUT_OP", "print": "OUTPUT_OP", "display": "OUTPUT_OP", "show": "OUTPUT_OP",
+            "function": "FUNC_DEF", "define": "FUNC_DEF", "method": "FUNC_DEF",
+            "if": "CONDITIONAL_IF", "condition": "CONDITIONAL_IF",
+            "else": "CONDITIONAL_ELSE",
+            "loop": ["LOOP_FOR", "LOOP_WHILE"], "iterate": ["LOOP_FOR", "LOOP_WHILE"], "repeat": ["LOOP_FOR", "LOOP_WHILE"],
+            "for": "LOOP_FOR",
+            "while": "LOOP_WHILE",
+            "return": "RETURN_STMT",
+            "add": "+", "sum": "+",
+            "subtract": "-", "difference": "-",
+            "multiply": "*", "product": "*",
+            "divide": "/", "quotient": "/",
+            "assign": "=", "variable": "VAR_GENERIC", "store": "=",
+            "compare": ["COMP_EQ", "COMP_NEQ", "<", ">", "COMP_LTE", "COMP_GTE"],
+            "equal": "COMP_EQ", "same": "COMP_EQ",
+            "not equal": "COMP_NEQ", "different": "COMP_NEQ",
+            "less than": "<",
+            "greater than": ">",
+            "less or equal": "COMP_LTE",
+            "greater or equal": "COMP_GTE",
+            "true": "BOOL_TRUE",
+            "false": "BOOL_FALSE",
+            "none": "NULL_VALUE", "null": "NULL_VALUE",
+            "string": "STRING_LITERAL_PLACEHOLDER", "text": "STRING_LITERAL_PLACEHOLDER",
+            "number": "NUMBER_LITERAL_PLACEHOLDER", "integer": "NUMBER_LITERAL_PLACEHOLDER", "float": "NUMBER_LITERAL_PLACEHOLDER"
+        }
+
+        # 1. Check for direct keyword mappings
+        import re
+        for keyword, abstract_token_or_list in agnostic_hint_map.items():
+            escaped_keyword = re.escape(keyword)
+            if re.search(r'\b' + escaped_keyword + r'\b', hint_lower):
+                tokens_to_add = abstract_token_or_list if isinstance(abstract_token_or_list, list) else [abstract_token_or_list]
+                for token_str in tokens_to_add:
+                    if token_str in self.tokenizer.token_to_id:
+                        token_id = self.tokenizer.token_to_id[token_str]
+                        hinted_token_ids.add(token_id)
+                        logging.debug(f"Hint '{hint}' mapped keyword '{keyword}' to abstract token: '{token_str}' (ID: {token_id})")
+                    else:
+                        logging.warning(f"Hint keyword map: Abstract token '{token_str}' not found in vocabulary.")
+
+        # 2. Check if any vocabulary tokens (non-special) are directly mentioned
         for token, token_id in self.tokenizer.token_to_id.items():
-            # Check if the token (stripped of quotes for literals) is in the hint words
-            token_text = token.strip('"')
-            if token_text in hint_words:
+             # Skip special tokens like <PAD>, <SOS>, etc.
+            if token.startswith('<') and token.endswith('>'):
+                continue
+                
+            # Check if the token itself (case-insensitive for matching hint words) is in the hint words
+            token_text_lower = token.strip('"').lower()
+            if token_text_lower in hint_words:
                 hinted_token_ids.add(token_id)
-                logging.debug(f"Hint '{hint}' matched token: '{token}' (ID: {token_id})")
-            # Additionally check if parts of multi-word tokens match (e.g., 'hello' in '"hello"')
-            elif token_text and token_text in hint: # Avoid matching empty strings
+                logging.debug(f"Hint '{hint}' directly matched token: '{token}' (ID: {token_id})")
+            # Additionally check if the token text appears as a substring in the hint
+            elif token_text_lower and token_text_lower in hint_lower:
                  hinted_token_ids.add(token_id)
-                 logging.debug(f"Hint '{hint}' contained token text: '{token_text}' (ID: {token_id})")
+                 logging.debug(f"Hint '{hint}' contained token text: '{token_text_lower}' (ID: {token_id})")
 
         return hinted_token_ids
-
-    # Python grammar constraints - basic rules that guide generation
-    PYTHON_GRAMMAR_RULES = {
-        "print": ["("],  # After 'print' expect opening parenthesis
-        "(": ["0", "1", "2", "3", "4", "5", "var_", '"', "'", "True", "False", "None"],  # After '(' expect value or variable
-        "=": ["0", "1", "2", "3", "4", "5", "var_", '"', "'", "True", "False", "None", "["], # After '=' expect a value
-        "+": ["0", "1", "2", "3", "4", "5", "var_", '"', "'", "("],  # After '+' expect a value or expression
-        "def": ["var_", "__init__"],  # After 'def' expect a function name
-        "return": ["var_", "0", "1", "2", "3", "4", "5", "True", "False", "None"],  # After 'return' expect a value
-        ":": ["\n"],  # After ':' expect a newline
-        "\n": ["    ", "def", "print", "var_", "return", "if", "for", "while", "class"]  # After newline expect indentation or statement
+    # Abstract grammar constraints using the new vocabulary
+    ABSTRACT_GRAMMAR_RULES = {
+        # After function definition, expect function name or opening parenthesis
+        "FUNC_DEF": ["FUNC_GENERIC", "("],
+        # After conditional, expect opening parenthesis (for condition)
+        "CONDITIONAL_IF": ["("],
+        "LOOP_WHILE": ["("],
+        # After loop keyword, expect variable or range-like construct
+        "LOOP_FOR": ["VAR_GENERIC"],
+        # After opening parenthesis, expect value, variable, or closing parenthesis
+        "(": ["NUMBER_LITERAL_PLACEHOLDER", "STRING_LITERAL_PLACEHOLDER", "VAR_GENERIC", "FUNC_GENERIC", ")", "BOOL_TRUE", "BOOL_FALSE", "NULL_VALUE"],
+        # After assignment, expect value, variable, or expression start
+        "=": ["NUMBER_LITERAL_PLACEHOLDER", "STRING_LITERAL_PLACEHOLDER", "VAR_GENERIC", "FUNC_GENERIC", "(", "[", "{", "BOOL_TRUE", "BOOL_FALSE", "NULL_VALUE"],
+        # After binary operators, expect value or variable
+        "+": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC", "("],
+        "-": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC", "("],
+        "*": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC", "("],
+        "/": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC", "("],
+        "COMP_EQ": ["NUMBER_LITERAL_PLACEHOLDER", "STRING_LITERAL_PLACEHOLDER", "VAR_GENERIC", "BOOL_TRUE", "BOOL_FALSE", "NULL_VALUE"],
+        "COMP_NEQ": ["NUMBER_LITERAL_PLACEHOLDER", "STRING_LITERAL_PLACEHOLDER", "VAR_GENERIC", "BOOL_TRUE", "BOOL_FALSE", "NULL_VALUE"],
+        "<": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC"],
+        ">": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC"],
+        "COMP_LTE": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC"],
+        "COMP_GTE": ["NUMBER_LITERAL_PLACEHOLDER", "VAR_GENERIC"],
+        # After return, expect value or variable
+        "RETURN_STMT": ["NUMBER_LITERAL_PLACEHOLDER", "STRING_LITERAL_PLACEHOLDER", "VAR_GENERIC", "BOOL_TRUE", "BOOL_FALSE", "NULL_VALUE"],
+        # After colon (often end of block header), expect newline
+        ":": ["\\n"],
+        # After newline, expect potential keywords, variables, or output
+        "\\n": ["OUTPUT_OP", "CONDITIONAL_IF", "LOOP_FOR", "LOOP_WHILE", "FUNC_DEF", "RETURN_STMT", "PASS_STMT", "VAR_GENERIC"]
+        # Add more rules as needed for brackets, commas, etc.
     }
-
     def generate(self, task=None, history=None, hint=None, temperature=0.7, last_feedback=None, feedback_history_for_fp=None):
         try:
             self.model.eval() # Set model to evaluation mode (disables dropout etc.)
@@ -393,31 +470,8 @@ class CodeGenerator:
                     template_guided = True
                     logging.info(f"Using template-guided generation (no_improvement_count: {self.no_improvement_count})")
                     
-                    if task and "add" in task.name.lower() and ("print" in task.description.lower() or "sum" in task.description.lower()):
-                        # For the add_two_numbers benchmark, directly return a valid solution
-                        valid_solutions = [
-                            "print(5+3)", 
-                            "print(5 + 3)",
-                            "a=5\nb=3\nprint(a+b)",
-                            "x=5\ny=3\nprint(x+y)",
-                            "def add(a,b):\n    return a+b\nprint(add(5,3))"
-                        ]
-                        # Randomly select a solution
-                        solution = random.choice(valid_solutions)
-                        logging.info(f"Generated template solution for add_two_numbers: {solution}")
-                        
-                        # Convert solution to token IDs
-                        token_ids = []
-                        for char in solution:
-                            for token_id, token_text in self.tokenizer.id_to_token.items():
-                                if token_text == char:
-                                    token_ids.append(token_id)
-                                    break
-                        
-                        # If conversion failed, fall back to regular generation
-                        if token_ids:
-                            generated_ids_tensor = torch.LongTensor(token_ids).to(self.device)
-                            return solution, generated_ids_tensor
+                    # Removed Python-specific template generation for 'add_two_numbers'
+                    # A new agnostic template system would be needed here if desired.
             
             # Parse hint if provided
             hinted_token_ids = self._parse_hint(hint)
@@ -425,7 +479,7 @@ class CodeGenerator:
             
             # Get benchmark-specific template tokens if available
             if task and not template_guided:
-                template_token_ids, template_boost = self.generate_template_for_benchmark(task)
+                template_token_ids, template_boost = self.generate_agnostic_template(task) # Call new function
                 if template_token_ids:
                     # Add template tokens to hinted tokens with higher boost
                     for token_id in template_token_ids:
@@ -433,17 +487,10 @@ class CodeGenerator:
                     hint_boost_factor = template_boost  # Use stronger boost for template tokens
                     logging.info(f"Added {len(template_token_ids)} template tokens with boost {template_boost}")
             
-            # Hint specifically for the simple addition benchmark
-            if task and "add" in task.name.lower() and "print" in task.description.lower():
-                # Boost tokens needed for printing sums
-                addition_hints = ["print", "(", ")", "+", "5", "3"]
-                for hint_token in addition_hints:
-                    for token_id, token in self.tokenizer.id_to_token.items():
-                        if token == hint_token:
-                            hinted_token_ids.add(token_id)
-                            logging.debug(f"Added task-specific hint token: '{token}' (ID: {token_id})")
+            # Removed Python-specific hint boosting for 'add_two_numbers'
 
-            generated_ids = []
+            generated_ids = [] # Full sequence for final output
+            generated_in_sequence = set() # Track tokens within this specific generation
             log_probs_list = [] # Store log probs of chosen tokens
 
             # Start sequence generation with SOS token
@@ -454,6 +501,7 @@ class CodeGenerator:
 
             # Initialize hidden state for the batch
             hidden = self.model.init_hidden(batch_size=1, device=self.device)
+            current_grammar_boost = self.initial_grammar_boost # Initialize grammar boost for this generation
 
             with torch.no_grad(): # Disable gradient calculation during generation
                 for _ in range(max_gen_length):
@@ -539,21 +587,37 @@ class CodeGenerator:
                             # logging.debug(f"Applied success boost factor {success_boost_factor} to {boost_applied_count} tokens.")
                     # --- End Success Token Boost ---
                     
-                    # --- Apply Python Grammar Rules ---
-                    if current_token_str in self.PYTHON_GRAMMAR_RULES:
-                        allowed_next_patterns = self.PYTHON_GRAMMAR_RULES[current_token_str]
-                        grammar_boost_factor = 2.0  # How much to boost grammatically valid tokens
+                    # --- Apply Abstract Grammar Rules ---
+                    if current_token_str in self.ABSTRACT_GRAMMAR_RULES:
+                        allowed_next_tokens = self.ABSTRACT_GRAMMAR_RULES[current_token_str]
+                        # Use the current, potentially decayed, grammar boost factor
+                        grammar_boost_factor = current_grammar_boost
                         
+                        boost_applied = False
                         # Boost probabilities of tokens that match the grammar rules
                         for token_id, token in self.tokenizer.id_to_token.items():
-                            for pattern in allowed_next_patterns:
-                                if token.startswith(pattern):
-                                    probabilities[token_id] *= grammar_boost_factor
-                                    logging.debug(f"Grammar boost: '{current_token_str}' -> '{token}'")
+                            # Check if the token itself is allowed, or if it's a placeholder type
+                            if token in allowed_next_tokens:
+                                probabilities[token_id] *= grammar_boost_factor
+                                boost_applied = True
+                                # logging.debug(f"Grammar boost: '{current_token_str}' -> '{token}'")
                         
-                        # Re-normalize after grammar boosting
-                        probabilities = probabilities / (probabilities.sum() + 1e-9)
-                    # --- End Python Grammar Rules ---
+                        # Re-normalize after grammar boosting if any boost was applied
+                        if boost_applied:
+                            probabilities = probabilities / (probabilities.sum() + 1e-9)
+                    # --- End Abstract Grammar Rules ---
+                    # --- Apply Repetition Penalty (for tokens generated in *this* sequence) ---
+                    if self.repetition_penalty < 1.0 and generated_in_sequence:
+                        penalty_applied_count = 0
+                        for token_id in generated_in_sequence:
+                             if 0 <= token_id < probabilities.shape[0]:
+                                probabilities[token_id] *= self.repetition_penalty
+                                penalty_applied_count += 1
+                        if penalty_applied_count > 0:
+                            # Re-normalize probabilities after applying penalty
+                            probabilities = probabilities / (probabilities.sum() + 1e-9)
+                            # logging.debug(f"Applied repetition penalty {self.repetition_penalty} to {penalty_applied_count} tokens.")
+                    # --- End Repetition Penalty ---
 
                     # Apply log_softmax to get log probabilities (numerically stable) - Use original logits for loss
                     log_probabilities = F.log_softmax(last_logits, dim=-1)
@@ -578,6 +642,37 @@ class CodeGenerator:
                     # --- End Token Frequency Tracking ---
 
                     logging.debug(f"Loop {_}: Sampled next token ID: {next_token_id} ('{token_str}')")
+                    # --- Early Stopping Checks ---
+                    # 1. Entropy Check
+                    if self.early_stop_entropy_threshold > 0.0:
+                        # Calculate normalized entropy
+                        log_probs_dist = torch.log(probabilities + 1e-9)
+                        entropy = -torch.sum(probabilities * log_probs_dist).item()
+                        max_entropy = torch.log(torch.tensor(self.tokenizer.vocab_size, dtype=torch.float)).item()
+                        normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0
+                        
+                        if normalized_entropy < self.early_stop_entropy_threshold:
+                            logging.info(f"Early stopping generation due to low entropy ({normalized_entropy:.4f} < {self.early_stop_entropy_threshold:.4f}) at step {_ + 1}.")
+                            break # Exit generation loop
+
+                    # 2. Repetition Check
+                    if self.early_stop_repetition_window > 0 and len(generated_ids) >= self.early_stop_repetition_window:
+                        last_n_tokens = generated_ids[-self.early_stop_repetition_window:]
+                        # Check for repeating subsequences of length >= threshold
+                        for length in range(self.early_stop_repetition_threshold, self.early_stop_repetition_window // 2 + 1):
+                            # Example: window=10, length=3. Check seq[7:10] == seq[4:7]
+                            # Example: window=10, length=4. Check seq[6:10] == seq[2:6]
+                            # Example: window=10, length=5. Check seq[5:10] == seq[0:5]
+                            idx = self.early_stop_repetition_window - length
+                            if last_n_tokens[idx:] == last_n_tokens[idx-length:idx]:
+                                repeating_sequence = self.tokenizer.decode(torch.LongTensor(last_n_tokens[idx:]))
+                                logging.info(f"Early stopping generation due to repeating sequence (length {length}): '{repeating_sequence}' at step {_ + 1}.")
+                                break # Exit inner loop (length check)
+                        else: # If inner loop completed without break
+                            continue # Continue generation loop
+                        break # Exit generation loop if inner loop broke (repetition found)
+                    # --- End Early Stopping Checks ---
+
                     # --- Token Handling ---
                     # 1. Stop if EOS token is generated
                     if next_token_id == self.tokenizer.eos_token_id:
@@ -585,6 +680,7 @@ class CodeGenerator:
 
                     # 2. Store generated ID (excluding SOS, implicitly excluding EOS by breaking)
                     generated_ids.append(next_token_id)
+                    generated_in_sequence.add(next_token_id) # Add to set for repetition penalty check
 
                     # 3. Store log probability of the *chosen* token for RL
                     log_probs_list.append(log_probabilities[next_token_id])
@@ -593,6 +689,12 @@ class CodeGenerator:
                     current_token_id = next_token_id
                     current_token_str = token_str  # Update current token string for grammar rules
                     input_tensor = torch.LongTensor([[current_token_id]]).to(self.device)
+
+                    # Decay grammar boost for the next step
+                    if self.grammar_boost_decay < 1.0:
+                        current_grammar_boost *= self.grammar_boost_decay
+                        # Optional: Add a minimum boost floor?
+                        # current_grammar_boost = max(1.0, current_grammar_boost)
 
             # Decode the generated sequence of IDs back to a string (outside the loop)
             generated_tensor = torch.LongTensor(generated_ids)
@@ -691,31 +793,7 @@ class CodeGenerator:
             max_gen_length = task.max_tokens if (task and task.max_tokens is not None) else self.max_gen_length
             
             # Check if we should use template-based generation
-            if hasattr(self, 'no_improvement_count') and self.no_improvement_count > 50 and self.best_reward < 0.5:
-                if random.random() < 0.7:  # 70% chance to use template
-                    # For add_two_numbers benchmark, directly return a valid solution
-                    if task and "add" in task.name.lower() and ("print" in task.description.lower() or "sum" in task.description.lower()):
-                        valid_solutions = [
-                            "print(5+3)", 
-                            "print(5 + 3)",
-                            "a=5\nb=3\nprint(a+b)",
-                            "x=5\ny=3\nprint(x+y)"
-                        ]
-                        solution = random.choice(valid_solutions)
-                        logging.info(f"Generated template solution for add_two_numbers: {solution}")
-                        
-                        # Convert solution to token IDs
-                        token_ids = []
-                        for char in solution:
-                            for token_id, token_text in self.tokenizer.id_to_token.items():
-                                if token_text == char:
-                                    token_ids.append(token_id)
-                                    break
-                        
-                        # If conversion successful, return the template
-                        if token_ids:
-                            generated_ids_tensor = torch.LongTensor(token_ids).to(self.device)
-                            return solution, generated_ids_tensor
+            # Removed Python-specific template generation for 'add_two_numbers' in beam search
             
             # Parse hint if provided
             hinted_token_ids = self._parse_hint(hint)
@@ -727,9 +805,13 @@ class CodeGenerator:
                 (
                     [self.tokenizer.sos_token_id],  # Token IDs (starting with SOS)
                     0.0,  # Score (log probability sum)
-                    self.model.init_hidden(batch_size=1, device=self.device)  # Hidden state
+                    self.model.init_hidden(batch_size=1, device=self.device),  # Hidden state
+                    self.initial_grammar_boost # Store initial boost with the beam state
                 )
             ]
+            
+            # Keep track of the current grammar boost factor for each beam
+            # Beams now: (token_ids, score, hidden_state, current_grammar_boost)
             
             for step in range(max_gen_length):
                 # Skip beam search if we only have one beam left
@@ -739,10 +821,11 @@ class CodeGenerator:
                 candidates = []
                 
                 # Process each beam
-                for token_ids, score, hidden in beams:
+                for token_ids, score, hidden, current_grammar_boost in beams:
                     # Skip completed sequences (ending with EOS)
                     if token_ids[-1] == self.tokenizer.eos_token_id:
-                        candidates.append((token_ids, score, hidden))
+                        # Pass the current boost factor along for completed sequences
+                        candidates.append((token_ids, score, hidden, current_grammar_boost))
                         continue
                         
                     # Create input tensor from last token
@@ -823,19 +906,38 @@ class CodeGenerator:
                                 # logging.debug(f"Beam Step: Applied success boost factor {success_boost_factor} to {boost_applied_count} tokens.")
                         # --- End Success Token Boost ---
                         
-                        # Apply grammar rules
+                        # --- Apply Abstract Grammar Rules ---
                         current_token_str = self.tokenizer.id_to_token.get(token_ids[-1], "<UNK>")
-                        if current_token_str in self.PYTHON_GRAMMAR_RULES:
-                            allowed_next_patterns = self.PYTHON_GRAMMAR_RULES[current_token_str]
-                            grammar_boost_factor = 2.0
+                        if current_token_str in self.ABSTRACT_GRAMMAR_RULES:
+                            allowed_next_tokens = self.ABSTRACT_GRAMMAR_RULES[current_token_str]
+                            # Use the current grammar boost for this beam
+                            grammar_boost_factor = current_grammar_boost
                             
+                            boost_applied = False
                             for token_id, token in self.tokenizer.id_to_token.items():
-                                for pattern in allowed_next_patterns:
-                                    if token.startswith(pattern):
+                                if token in allowed_next_tokens:
+                                     if 0 <= token_id < probabilities.shape[0]:
                                         probabilities[token_id] *= grammar_boost_factor
+                                        boost_applied = True
                             
-                            probabilities = probabilities / (probabilities.sum() + 1e-9)
-                        
+                            if boost_applied:
+                                probabilities = probabilities / (probabilities.sum() + 1e-9)
+                        # --- End Abstract Grammar Rules ---
+                        # --- Apply Repetition Penalty (for tokens generated in *this* beam) ---
+                        if self.repetition_penalty < 1.0:
+                            current_beam_tokens = set(token_ids[1:]) # Exclude SOS token
+                            if current_beam_tokens:
+                                penalty_applied_count = 0
+                                for token_id in current_beam_tokens:
+                                    if 0 <= token_id < probabilities.shape[0]:
+                                        probabilities[token_id] *= self.repetition_penalty
+                                        penalty_applied_count += 1
+                                if penalty_applied_count > 0:
+                                    # Re-normalize probabilities after applying penalty
+                                    probabilities = probabilities / (probabilities.sum() + 1e-9)
+                                    # logging.debug(f"Beam Step: Applied repetition penalty {self.repetition_penalty} to {penalty_applied_count} tokens.")
+                        # --- End Repetition Penalty ---
+
                         # Get top-k next tokens
                         log_probs = torch.log(probabilities + 1e-9)
                         topk_log_probs, topk_indices = torch.topk(log_probs, k=min(beam_width, len(probabilities)))
@@ -846,12 +948,18 @@ class CodeGenerator:
                             next_score = score + topk_log_probs[i].item()
                             next_token_ids = token_ids + [next_token_id]
                             
-                            candidates.append((next_token_ids, next_score, new_hidden))
+                            # Calculate decayed boost for the next step
+                            next_grammar_boost = current_grammar_boost * self.grammar_boost_decay if self.grammar_boost_decay < 1.0 else current_grammar_boost
+                            
+                            candidates.append((next_token_ids, next_score, new_hidden, next_grammar_boost))
                 
                 # Sort candidates by score and keep top beam_width
+                # Sort candidates by score and keep top beam_width
+                # x[1] is the score
                 beams = sorted(candidates, key=lambda x: x[1], reverse=True)[:beam_width]
             
             # Select the best beam
+            # Select the best beam based on score (index 1)
             best_beam = max(beams, key=lambda x: x[1])
             best_token_ids = best_beam[0]
             
@@ -1144,59 +1252,157 @@ class CodeGenerator:
                  # Still reset counter to avoid rapid successive reduction checks
                  self.no_improvement_count = 0
 
-    def generate_template_for_benchmark(self, task):
+    def generate_agnostic_template(self, task):
         """
-        Generates a template code skeleton based on the benchmark task.
-        This helps guide the model toward valid syntax patterns.
-        
+        Generates a sequence of abstract token IDs based on keywords in the task description.
+        This provides a basic structural hint for the generator.
+
         Args:
             task: The benchmark task object
-        
+
         Returns:
             tuple: (template_token_ids, template_boost_factor)
                 template_token_ids: List of token IDs for template tokens to boost
                 template_boost_factor: How much to boost template tokens
         """
         template_tokens = []
-        template_boost_factor = 3.0  # Stronger boost for template tokens
+        template_boost_factor = 2.5 # Slightly lower boost than before, more general
         
-        # Extract common patterns from task name and description
         task_desc = task.description.lower() if hasattr(task, 'description') else ""
         task_name = task.name.lower() if hasattr(task, 'name') else ""
-        
-        # For the add_two_numbers benchmark, provide a specific template
-        if "add" in task_name and ("print" in task_desc and "sum" in task_desc):
-            logging.info("Using addition benchmark template")
-            # Extract numbers from task description if available
-            import re
-            numbers = re.findall(r'\d+', task_desc)
-            if len(numbers) >= 2:
-                num1, num2 = numbers[:2]
-                logging.info(f"Extracted numbers from task: {num1}, {num2}")
-                
-                # Create multiple valid solution templates
-                templates = [
-                    f"print({num1}+{num2})",  # Direct addition
-                    f"x={num1}\ny={num2}\nprint(x+y)",  # Variables
-                    f"print({num1} + {num2})"  # Spaced addition
-                ]
-                
-                # Randomly choose one template
-                import random
-                template = random.choice(templates)
-                logging.info(f"Selected template: {template}")
-                
-                # Get token IDs for the template
-                template_tokens = set()
-                for token in template:
-                    for token_id, token_text in self.tokenizer.id_to_token.items():
-                        if token == token_text or token in token_text:
-                            template_tokens.add(token_id)
-                            
-        # Convert to list
-        template_token_ids = list(template_tokens)
+        combined_text = task_name + " " + task_desc
+
+        # Simple keyword mapping to abstract tokens
+        # Import re locally if not already imported globally
+        import re 
+        keyword_map = {
+            "output": "OUTPUT_OP", "print": "OUTPUT_OP", "display": "OUTPUT_OP", "show": "OUTPUT_OP",
+            "function": "FUNC_DEF", "define": "FUNC_DEF", "method": "FUNC_DEF",
+            "if": "CONDITIONAL_IF", "condition": "CONDITIONAL_IF",
+            "else": "CONDITIONAL_ELSE",
+            "loop": ["LOOP_FOR", "LOOP_WHILE"], "iterate": ["LOOP_FOR", "LOOP_WHILE"], "repeat": ["LOOP_FOR", "LOOP_WHILE"],
+            "for": "LOOP_FOR",
+            "while": "LOOP_WHILE",
+            "return": "RETURN_STMT",
+            "add": "+", "sum": "+",
+            "subtract": "-", "difference": "-",
+            "multiply": "*", "product": "*",
+            "divide": "/", "quotient": "/",
+            "assign": "=", "variable": "VAR_GENERIC", "store": "=",
+            "compare": ["COMP_EQ", "COMP_NEQ", "<", ">", "COMP_LTE", "COMP_GTE"], 
+            "equal": "COMP_EQ", "same": "COMP_EQ",
+            "not equal": "COMP_NEQ", "different": "COMP_NEQ",
+            "less than": "<",
+            "greater than": ">",
+            "less or equal": "COMP_LTE",
+            "greater or equal": "COMP_GTE",
+            "true": "BOOL_TRUE",
+            "false": "BOOL_FALSE",
+            "none": "NULL_VALUE", "null": "NULL_VALUE"
+        }
+
+        found_abstract_tokens = set()
+
+        # Check for keywords in the combined task text
+        for keyword, abstract_token_or_list in keyword_map.items():
+            # Use regex to find whole words or phrases to avoid partial matches (e.g., 'if' in 'different')
+            # Handle keywords that might be regex special characters (like '+', '*')
+            escaped_keyword = re.escape(keyword)
+            if re.search(r'\b' + escaped_keyword + r'\b', combined_text):
+                if isinstance(abstract_token_or_list, list):
+                    for token in abstract_token_or_list:
+                         found_abstract_tokens.add(token)
+                else:
+                    found_abstract_tokens.add(abstract_token_or_list)
+
+        # Convert found abstract token strings to IDs
+        template_token_ids = []
+        for token_str in found_abstract_tokens:
+            if token_str in self.tokenizer.token_to_id:
+                template_token_ids.append(self.tokenizer.token_to_id[token_str])
+            else:
+                 logging.warning(f"Agnostic template keyword '{token_str}' not found in vocabulary.")
+
+        if template_token_ids:
+             logging.info(f"Generated agnostic template tokens based on task description: {found_abstract_tokens}")
+
         return template_token_ids, template_boost_factor
 
+    def generate_agnostic_template(self, task):
+        """
+        Generates a sequence of abstract token IDs based on keywords in the task description.
+        This provides a basic structural hint for the generator.
+
+        Args:
+            task: The benchmark task object
+
+        Returns:
+            tuple: (template_token_ids, template_boost_factor)
+                template_token_ids: List of token IDs for template tokens to boost
+                template_boost_factor: How much to boost template tokens
+        """
+        template_tokens = []
+        template_boost_factor = 2.5 # Slightly lower boost than before, more general
+        
+        task_desc = task.description.lower() if hasattr(task, 'description') else ""
+        task_name = task.name.lower() if hasattr(task, 'name') else ""
+        combined_text = task_name + " " + task_desc
+
+        # Simple keyword mapping to abstract tokens
+        # Import re locally if not already imported globally
+        import re
+        keyword_map = {
+            "output": "OUTPUT_OP", "print": "OUTPUT_OP", "display": "OUTPUT_OP", "show": "OUTPUT_OP",
+            "function": "FUNC_DEF", "define": "FUNC_DEF", "method": "FUNC_DEF",
+            "if": "CONDITIONAL_IF", "condition": "CONDITIONAL_IF",
+            "else": "CONDITIONAL_ELSE",
+            "loop": ["LOOP_FOR", "LOOP_WHILE"], "iterate": ["LOOP_FOR", "LOOP_WHILE"], "repeat": ["LOOP_FOR", "LOOP_WHILE"],
+            "for": "LOOP_FOR",
+            "while": "LOOP_WHILE",
+            "return": "RETURN_STMT",
+            "add": "+", "sum": "+",
+            "subtract": "-", "difference": "-",
+            "multiply": "*", "product": "*",
+            "divide": "/", "quotient": "/",
+            "assign": "=", "variable": "VAR_GENERIC", "store": "=",
+            "compare": ["COMP_EQ", "COMP_NEQ", "<", ">", "COMP_LTE", "COMP_GTE"],
+            "equal": "COMP_EQ", "same": "COMP_EQ",
+            "not equal": "COMP_NEQ", "different": "COMP_NEQ",
+            "less than": "<",
+            "greater than": ">",
+            "less or equal": "COMP_LTE",
+            "greater or equal": "COMP_GTE",
+            "true": "BOOL_TRUE",
+            "false": "BOOL_FALSE",
+            "none": "NULL_VALUE", "null": "NULL_VALUE"
+        }
+
+        found_abstract_tokens = set()
+
+        # Check for keywords in the combined task text
+        for keyword, abstract_token_or_list in keyword_map.items():
+            # Use regex to find whole words or phrases to avoid partial matches (e.g., 'if' in 'different')
+            # Handle keywords that might be regex special characters (like '+', '*')
+            escaped_keyword = re.escape(keyword)
+            if re.search(r'\b' + escaped_keyword + r'\b', combined_text):
+                if isinstance(abstract_token_or_list, list):
+                    for token in abstract_token_or_list:
+                         found_abstract_tokens.add(token)
+                else:
+                    found_abstract_tokens.add(abstract_token_or_list)
+
+        # Convert found abstract token strings to IDs
+        template_token_ids = []
+        for token_str in found_abstract_tokens:
+            if token_str in self.tokenizer.token_to_id:
+                template_token_ids.append(self.tokenizer.token_to_id[token_str])
+            else:
+                 logging.warning(f"Agnostic template keyword '{token_str}' not found in vocabulary.")
+
+        if template_token_ids:
+             logging.info(f"Generated agnostic template tokens based on task description: {found_abstract_tokens}")
+
+        return template_token_ids, template_boost_factor
 
     def get_state(self):
         """Returns a dictionary containing the current state of the generator for reporting."""

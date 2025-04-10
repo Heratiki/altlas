@@ -11,6 +11,7 @@ All improvements and modifications in this plan should strictly adhere to this p
 - Backward compatibility must be maintained for all critical components
 - Refactoring should preserve behavior and interfaces of existing systems
 - Each change should be isolated and reversible if unexpected issues arise
+- The rich UI display now shows an estimated total time to 100% completion based on current progress and elapsed time.
 
 This conservative approach ensures that the evolution of AltLAS builds on our working foundation rather than risking destabilization of functioning components. All developers should verify that their changes integrate seamlessly with the existing codebase before merging.
 
@@ -96,26 +97,30 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Create dynamic entropy coefficient based on success rate
   - [✓] Create dynamic learning rate based on performance
 
+  - [✓] Add penalty for token repetition within a single generated sequence (`RepetitionPenalty` config).
+  - [ ] Consider explicit entropy-based reward shaping for diversity (Partially covered by entropy bonus).
 - [✓] **3.3 Improve REINFORCE Implementation**
   - [✓] Verify correct gradient flow and parameter updates (added logging)
   - [✓] Add baseline for variance reduction (EMA baseline)
   - [✓] Fix policy gradient calculation to properly scale with advantage
   - [✓] Support for experience replay of successful attempts
 
+  - [ ] Explore per-token or delayed reward mechanisms.
 ### 4. Tokenization and Vocabulary Improvements
 
 **Goal**: Ensure the vocabulary and tokenization support effective code generation
 
-- [✓] **4.1 Enhance Vocabulary in `memory/vocab.json`**
+- [🔄] **4.1 Enhance Vocabulary in `memory/vocab.json`**
   - [✓] Analyze current vocabulary for gaps
-  - [✓] Add common coding constructs and Python syntax elements (punctuation, operators, newline)
+  - [✓] Add common coding constructs and Python syntax elements (punctuation, operators, newline) - *Replaced with abstract tokens*
   - [✓] Ensure proper special tokens (PAD, SOS, EOS, UNK) - *Verified*
+  - [✓] Transitioned to language-agnostic abstract tokens (e.g., `OUTPUT_OP`, `FUNC_DEF`). *Requires model retraining.*
 
-- [✓] **4.2 Improve Tokenizer in `tokenizer.py`**
+- [🔄] **4.2 Improve Tokenizer in `tokenizer.py`**
   - [✓] Enhance encoding/decoding functionality (greedy matching, newline handling)
   - [✓] Add better handling for unknown tokens (basic UNK mapping)
   - [✓] Implement normalization of code before tokenization
-  - [✓] Add handling for INDENT/DEDENT tokens
+  - [✓] Add handling for INDENT/DEDENT tokens - *Removed due to abstract vocabulary.*
 
 - [✓] **4.3 Add Token Usage Analytics**
   - [✓] Track token distribution in generated code (initialized counter and counting logic in `generator.py`)
@@ -239,14 +244,15 @@ Each task below should be completed while preserving existing functionality. Tas
   - *Note: Attention mechanism code is present in `model.py` but currently commented out/disabled.*
 
 - [✓] **10.2 Hierarchical Generation**
-  - [✓] Add code structure prediction (function, class, loop, etc.) via grammar rules
-  - [✓] Implement two-stage generation (structure then details) with template guidance
+  - [✓] Add code structure prediction via abstract grammar rules (`ABSTRACT_GRAMMAR_RULES`).
+  - [✓] Implement template guidance using agnostic templates (`generate_agnostic_template`).
   - [ ] Add syntax tree-aware generation
   - [✓] Implement beam search for better exploration
 
+  - [✓] Implement early stopping during generation based on low entropy or repetition (`EarlyStop...` configs).
 - [✓] **10.3 Context Integration**
   - [✓] Add task embedding to condition generation via template guidance
-  - [✓] Implement better hint integration mechanism with grammar-aware boosting
+  - [✓] Implement better hint integration mechanism with agnostic hint parsing (`_parse_hint`).
   - [ ] Add error message understanding
   - [ ] Implement code context window
 
@@ -282,14 +288,15 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Use lower temperature for exploitation when score is improving
 
 - [✓] **12.2 Grammar-Guided Generation**
-  - [✓] Implement Python grammar rules to guide token selection
+  - [✓] Implement abstract grammar rules (`ABSTRACT_GRAMMAR_RULES`) to guide token selection.
   - [✓] Boost probabilities of grammatically valid next tokens
   - [✓] Add top-k sampling to restrict to most likely tokens
 
+  - [✓] Implement decay for grammar boost influence over time (`GrammarBoostDecay` config).
 - [✓] **12.3 Template-Guided Generation**
-  - [✓] Add benchmark-specific templates for common tasks
-  - [✓] Implement fallback to template solutions when stuck
-  - [✓] Create direct solution templates for simple benchmarks
+  - [✓] Add agnostic template generation based on task keywords (`generate_agnostic_template`).
+  - [✓] Implement fallback to template solutions when stuck (logic remains).
+  - [ ] Create direct solution templates for simple benchmarks (agnostic version needed).
 
 - [✓] **12.4 Weight Management**
   - [✓] Implement weight reset mechanism when stuck in bad local minima
@@ -336,9 +343,9 @@ Each task below should be completed while preserving existing functionality. Tas
 
 **Goal**: Evolve AltLAS's vocabulary into a more abstract, language-agnostic system that supports future tasks and multi-language compatibility.
 
-- [ ] **14.1 Implement Abstract Token Roles**
-  - [ ] Replace language-specific tokens (e.g., `print`, `def`) with role-based placeholders such as `FUNC_CALL`, `OUTPUT_OP`, `LOOP_KEYWORD`.
-  - [ ] Facilitate generalization across multiple programming languages through abstraction.
+- [✓] **14.1 Implement Abstract Token Roles**
+  - [✓] Replaced language-specific tokens with role-based placeholders (`OUTPUT_OP`, `FUNC_DEF`, etc.) in `memory/vocab.json`.
+  - [✓] Facilitates generalization but requires model retraining and tokenizer/generator adaptation.
 
 - [ ] **14.2 Introduce Structured Identifier Tokens**
   - [ ] Add generic tokens like `VAR_GENERIC`, `FUNC_GENERIC`, `BLOCK_START`, `BLOCK_END` to better capture program structure.
@@ -555,5 +562,7 @@ Additionally, document any unexpected challenges, solutions found, or new insigh
 *   **2025-04-09 (14):** Improved the hint generation system in `TrainingLoop` with a more scaffolding-oriented approach. Modified `_get_hint_from_advisor` to provide simpler, more code-focused hints (keywords, function names, operators, or short code snippets) rather than full sentences. Added a new `_post_process_hint` method to ensure brevity and remove explanatory phrases from generated hints.
 *   **2025-04-09 (15):** Reduced log file size from 5MB to 2.5MB per file in `runner.py` and configured log cleanup with the `--reset` flag. Modified `AttemptManager.reset_training_state()` to also delete log files and training report files when resetting for a fresh training run.
 *   **2025-04-09 (16):** Added LM Studio integration to training reports by implementing `_call_local_llm` and `add_llm_observations` methods in `TrainingReportGenerator`. This feature automatically connects to a locally running LM Studio model to generate AI-powered observations and insights about the training process, adding them to the end of each report.
+*   **2025-04-09 (17):** Implemented several generator enhancements: Repetition Penalty (within sequence), Grammar Boost Decay, and Early Stopping (Entropy/Repetition). Configurable via `config.ini`.
+*   **2025-04-09 (18):** Transitioned vocabulary (`memory/vocab.json`) to language-agnostic abstract tokens (Task 14.1). Updated `tokenizer.py` (removed INDENT/DEDENT) and `agent_core/generator.py` (removed Python grammar/templates, added abstract grammar/templates/hint parsing). **This is a breaking change requiring model retraining (`--reset` flag).**
 
 ---

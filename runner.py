@@ -45,7 +45,7 @@ file_handler = None
 console_handler = None
 log = logging.getLogger()
 
-def setup_logging(recreate_handlers=False):
+def setup_logging(recreate_handlers=False, debug_mode=False):
     """
     Set up logging with file and console handlers.
     
@@ -104,12 +104,14 @@ def setup_logging(recreate_handlers=False):
     if console_handler is None:
         # Console Handler (Rich)
         console_handler = RichHandler(console=log_console, rich_tracebacks=True, show_path=False)
-        console_handler.setLevel(logging.INFO)  # Console shows INFO+
+        console_log_level = logging.DEBUG if debug_mode else logging.INFO
+        console_handler.setLevel(console_log_level) # Set console level based on debug flag
         log.addHandler(console_handler)
     
     return log
 
 # Initial logging setup
+# Initial logging setup (before parsing args, so debug_mode is False)
 setup_logging()
 
 # Define signal handler for Ctrl+C
@@ -135,10 +137,19 @@ def main():
                         help="Name of the task JSON file to load (without .json extension). Defaults to benchmark_add_two_numbers.")
     parser.add_argument("--reset", action="store_true", 
                         help="Reset all training state files and start from attempt 1.")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable debug level logging to the console.")
     args = parser.parse_args()
     task_to_load = args.task
     reset_training = args.reset
+    debug_mode = args.debug
     # --- End Argument Parsing ---
+
+    # --- Reconfigure Logging Based on Args ---
+    # Re-setup logging in case debug mode changed the desired console level
+    # Pass the parsed debug_mode flag
+    setup_logging(recreate_handlers=False, debug_mode=debug_mode)
+    # --- End Logging Reconfiguration ---
 
     try:
         # --- Initialize Core Components ---
@@ -154,7 +165,8 @@ def main():
             reset_successful = attempt_manager.reset_training_state()
             
             # Recreate logging handlers after reset since the log files were deleted
-            setup_logging(recreate_handlers=True)
+            # Pass debug_mode when recreating handlers after reset
+            setup_logging(recreate_handlers=True, debug_mode=debug_mode)
             
             if reset_successful:
                 log.info("✅ Training state reset complete - starting from attempt 1")

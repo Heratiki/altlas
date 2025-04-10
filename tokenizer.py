@@ -36,7 +36,8 @@ class Tokenizer:
         # Initialize token usage counts
         self.token_usage = {token: 0 for token in self.token_to_id}
         # Remove special tokens from sorted list used for matching code text
-        self._sorted_tokens_no_special = [t for t in self._sorted_tokens if not (t.startswith('<') and t.endswith('>')) and t not in ["INDENT", "DEDENT"]]
+        # Keep abstract tokens, only remove special <...> tokens for matching
+        self._sorted_tokens_no_special = [t for t in self._sorted_tokens if not (t.startswith('<') and t.endswith('>'))]
         logging.info(f"Prepared {len(self._sorted_tokens_no_special)} non-special tokens for matching.")
 
     def _load_vocab(self):
@@ -153,24 +154,8 @@ class Tokenizer:
         # --- Normalization step ---
         text = self._normalize_code(text)
 
-        # --- Insert INDENT/DEDENT tokens based on indentation levels ---
-        lines = text.split('\n')
-        processed_lines = []
-        indent_stack = [0]  # Stack of indentation levels
-        for line in lines:
-            stripped = line.lstrip(' \t')
-            indent_len = len(line) - len(stripped)
-            tokens = []
-            if indent_len > indent_stack[-1]:
-                tokens.append('<INDENT>')
-                indent_stack.append(indent_len)
-            while indent_len < indent_stack[-1]:
-                tokens.append('<DEDENT>')
-                indent_stack.pop()
-            tokens.append(stripped)
-            processed_lines.append(' '.join(tokens))
-        text = '\n'.join(processed_lines)
-
+        # --- Removed Python-specific INDENT/DEDENT logic ---
+        # Indentation/structure must now be learned implicitly or handled differently
         encoded_ids = [self.sos_token_id]
         remaining_text = text
         current_pos = 0
@@ -248,13 +233,7 @@ class Tokenizer:
             # Handle special tokens for formatting
             if token == "\\n":
                 decoded_string += "\n"
-            # FUTURE: Handle INDENT/DEDENT here to add/remove leading spaces
-            # elif token == "INDENT":
-            #     current_indent += "    " # Or based on config
-            #     decoded_string += "\n" + current_indent # Indent usually follows newline
-            # elif token == "DEDENT":
-            #     current_indent = current_indent[:-4] # Or based on config
-            #     # Dedent might not always follow newline, handle context?
+            # --- Removed Python-specific INDENT/DEDENT decoding logic ---
             else:
                 # Basic joining - needs refinement for spacing around operators/punctuation
                 # Add space unless previous char was newline or it's the start

@@ -29,7 +29,7 @@ class UIDisplay:
         # Create the Rich layout
         self.layout = Layout()
         self.layout.split(
-            Layout(name="header", size=5),  # Increased size for progress and timing info
+            Layout(name="header", size=10), # Increased size for progress and timing info
             Layout(name="main"),
             Layout(name="footer", size=3)
         )
@@ -170,9 +170,16 @@ class UIDisplay:
             estimated_time_remaining = remaining_attempts / current_rate
         else:
             estimated_time_remaining = float('inf')
+        # Calculate estimated total time to 100%
+        progress_percent = 100 * attempt_count / max_attempts if max_attempts > 0 else 0
+        if progress_percent > 0:
+            total_estimated_time = elapsed_time / (progress_percent / 100)
+        else:
+            total_estimated_time = float('inf')
         
         # Create timing table
         timing_table = Table(show_header=False, box=None)
+        timing_table.add_row("Est. Total Time", self._format_time(total_estimated_time))
         timing_table.add_row("Elapsed Time", self._format_time(elapsed_time))
         timing_table.add_row("Est. Remaining", self._format_time(estimated_time_remaining))
         timing_table.add_row("Current Rate", f"{current_rate:.1f} attempts/sec")
@@ -182,7 +189,7 @@ class UIDisplay:
         # Create a new layout for the header content
         header_content = Layout()
         header_content.split(
-            Layout(self.progress, size=3),
+            Layout(self.progress, size=1), # Progress bar typically needs only 1 line
             Layout(timing_table)
         )
         

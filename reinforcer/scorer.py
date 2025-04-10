@@ -28,6 +28,30 @@ class AttemptScorer:
         # No scorer-specific config needed for now
         # scorer_config = config['Scorer']
         
+    def normalize_for_scoring(self, decoded_code: str) -> str:
+        """Replaces abstract token representations with concrete literals for scoring."""
+        # TODO: Consider making these replacements configurable or loading from vocab
+        replacements = {
+            "VAR_GENERIC": "x",
+            "NUMBER_LITERAL_PLACEHOLDER": "3",
+            "FUNC_GENERIC": "my_function",
+            "FUNC_DEF": "def",
+            "RETURN_STMT": "return",
+            # Add more abstract tokens and their representative literals as needed
+            # e.g., "STRING_LITERAL_PLACEHOLDER": "'abc'",
+            #       "CLASS_DEF": "class",
+            #       "IMPORT_STMT": "import",
+        }
+        
+        normalized_code = decoded_code
+        # Use regex to replace whole words only to avoid partial matches (e.g., VAR_GENERIC_2)
+        for abstract, literal in replacements.items():
+            # Use word boundaries (\b) to match whole tokens
+            normalized_code = re.sub(r'\b' + re.escape(abstract) + r'\b', literal, normalized_code)
+            
+        return normalized_code
+
+
     def score(self, code_attempt: str, result, task) -> float:
         """Score the execution result against the task's success criteria,
         using a modular, adaptive reward shaping strategy.
@@ -75,9 +99,11 @@ class AttemptScorer:
         return final_score
     
     def _evaluate_syntax(self, code_attempt: str) -> float:
-        """Evaluate the syntactic validity of the code."""
+        """Evaluate the syntactic validity of the code after normalization."""
+        # TODO: Track normalization dependency for future vocab changes
+        normalized_attempt = self.normalize_for_scoring(code_attempt)
         try:
-            ast.parse(code_attempt)
+            ast.parse(normalized_attempt)
             # Give a moderate score for valid syntax
             return 0.25
         except SyntaxError:
@@ -132,13 +158,15 @@ class AttemptScorer:
         return feedback_scores.get(feedback_type, 0.1)  # Still return 0.1 as absolute fallback
     
     def _evaluate_output_match(self, result, task) -> float:
-        """Evaluate how well the output matches the expected output."""
+        """Evaluate how well the normalized output matches the expected output."""
+        # TODO: Track normalization dependency for future vocab changes
         # Default score if no expected output
         if 'success_criteria' not in task.__dict__ or 'expected_output' not in task.success_criteria:
             return 0.0
-            
+
         expected_output = task.success_criteria.get('expected_output', '').strip()
-        actual_output = result.stdout.strip()
+        # Normalize the actual output before comparing
+        actual_output = self.normalize_for_scoring(result.stdout.strip())
         
         if not expected_output:  # No expected output defined
             return 0.0
@@ -187,11 +215,14 @@ class AttemptScorer:
         return min(0.9, similarity_score + structure_score)
     
     def _check_exact_pattern_match(self, code_attempt: str, task) -> bool:
-        """Check if code exactly matches any of the valid patterns."""
+        """Check if normalized code exactly matches any of the valid patterns."""
+        # TODO: Track normalization dependency for future vocab changes
         if 'valid_patterns' not in task.success_criteria:
             return False
-            
-        normalized_attempt = self._normalize_code(code_attempt, task)
+
+        # First, normalize abstract tokens, then normalize whitespace/case
+        normalized_for_scoring = self.normalize_for_scoring(code_attempt)
+        normalized_attempt = self._normalize_code(normalized_for_scoring, task)
         
         for pattern_group in task.success_criteria['valid_patterns']:
             # Check main pattern
@@ -238,11 +269,14 @@ class AttemptScorer:
         pattern = pattern_group.get('pattern', '')
         normalized_pattern = self._normalize_pattern(pattern, task)
         return normalized_code == normalized_pattern
-    
     def _calculate_pattern_similarity(self, code_attempt: str, task) -> float:
-        """Calculate similarity between code and valid patterns."""
+        """Calculate similarity between normalized code and valid patterns."""
+        # TODO: Track normalization dependency for future vocab changes
         max_similarity = 0.0
-        normalized_attempt = self._normalize_code(code_attempt, task)
+        # First, normalize abstract tokens, then normalize whitespace/case
+        normalized_for_scoring = self.normalize_for_scoring(code_attempt)
+        normalized_attempt = self._normalize_code(normalized_for_scoring, task)
+
         
         for pattern_group in task.success_criteria.get('valid_patterns', []):
             # Check main pattern
@@ -266,36 +300,38 @@ class AttemptScorer:
         return scaled_similarity
     
     def _evaluate_constraints(self, code_attempt: str, task) -> float:
-        """Evaluate if code meets task-specific constraints."""
+        """Evaluate if normalized code meets task-specific constraints."""
+        # TODO: Track normalization dependency for future vocab changes
+        normalized_attempt = self.normalize_for_scoring(code_attempt)
         constraints = getattr(task, 'constraints', {})
         if not constraints:
             return 0.0
             
         score = 0.0
         
-        # Check for required operators
+        # Check for required operators in normalized code
         if 'required_operators' in constraints:
-            operators_found = all(op in code_attempt for op in constraints['required_operators'])
+            operators_found = all(op in normalized_attempt for op in constraints['required_operators'])
             if operators_found:
                 score += 0.05
                 
-        # Check for required numbers/values
+        # Check for required numbers/values in normalized code
         if 'required_numbers' in constraints:
-            # Convert numbers to strings for checking presence in code
-            numbers_found = all(str(num) in code_attempt for num in constraints['required_numbers'])
+            # Convert numbers to strings for checking presence in normalized code
+            numbers_found = all(str(num) in normalized_attempt for num in constraints['required_numbers'])
             if numbers_found:
                 score += 0.05
                 
-        # Check for required keywords/identifiers
+        # Check for required keywords/identifiers in normalized code
         if 'required_keywords' in constraints:
-            keywords_found = all(kw in code_attempt for kw in constraints['required_keywords'])
+            keywords_found = all(kw in normalized_attempt for kw in constraints['required_keywords'])
             if keywords_found:
                 score += 0.05
                 
-        # Check for token limit constraints
+        # Check for token limit constraints (using original code for token count is okay)
         if 'max_tokens' in constraints:
-            # Simple approximation of token count using split
-            token_count = len(code_attempt.split())
+            # Simple approximation of token count using split on original code
+            token_count = len(code_attempt.split()) # Use original code for token count
             if token_count <= constraints['max_tokens']:
                 score += 0.05
                 
@@ -303,19 +339,21 @@ class AttemptScorer:
     
     def _evaluate_semantic_similarity(self, code_attempt: str, result, task) -> float:
         """
-        Evaluate semantic similarity of the code to the task requirements.
+        Evaluate semantic similarity of the normalized code to the task requirements.
         This looks at deeper meaning rather than just surface patterns.
         """
+        # TODO: Track normalization dependency for future vocab changes
+        normalized_attempt = self.normalize_for_scoring(code_attempt)
         # Initialize semantic score
         semantic_score = 0.0
-        
+
         # Check if code contains key concepts from the task description
         if hasattr(task, 'description'):
             # Extract likely keywords from task description
             description_keywords = self._extract_keywords(task.description)
             
-            # Check for keyword presence in code
-            keyword_matches = sum(1 for kw in description_keywords if kw in code_attempt)
+            # Check for keyword presence in normalized code
+            keyword_matches = sum(1 for kw in description_keywords if kw in normalized_attempt)
             if keyword_matches > 0:
                 semantic_score += min(0.2, keyword_matches * 0.05)  # Cap at 0.2
         
@@ -325,19 +363,21 @@ class AttemptScorer:
             
             # Function name matching
             if 'function_name' in criteria:
+                # Check against normalized code
                 function_pattern = f"def {criteria['function_name']}"
-                if function_pattern in code_attempt:
+                if function_pattern in normalized_attempt:
                     semantic_score += 0.2
             
             # Class name matching
             if 'class_name' in criteria:
+                # Check against normalized code
                 class_pattern = f"class {criteria['class_name']}"
-                if class_pattern in code_attempt:
+                if class_pattern in normalized_attempt:
                     semantic_score += 0.2
         
-        # Look at AST structure to evaluate if code has the right elements
+        # Look at AST structure of normalized code to evaluate if it has the right elements
         try:
-            tree = ast.parse(code_attempt)
+            tree = ast.parse(normalized_attempt)
             
             # Check for specific AST node types that might be required
             # This is a generic check that can be enhanced for specific tasks

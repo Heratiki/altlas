@@ -221,11 +221,17 @@ class TrainingLoop:
                                 self.ui_display.add_status_message(f"✅ Duplicate success (Score: {score:.2f}). Reinforcing.")
                                 # Proceed to learning step
                             else:
-                                # Skip low-scoring duplicates as before
-                                self.ui_display.add_status_message(f"⚠️ Duplicate code attempt detected (Score: {score:.2f}, Hash: {fingerprint[:8]}...). Skipping.")
-                                log.warning(f"⚠️ Duplicate code attempt detected at attempt {self.attempt_count} (Score: {score:.2f}, Hash: {fingerprint}). Skipping.")
+                                dup_count = self.attempt_manager.fingerprints.get(fingerprint, 1)
+                                penalty = 0.1 * dup_count
+                                original_score = score
+                                score -= penalty
+                                score = max(score, -1.0)  # Clamp minimum score
+                                self.ui_display.add_status_message(
+                                    f"📉 Penalty {penalty:.2f} applied to duplicate (count={dup_count}) - score reduced from {original_score:.2f} to {score:.2f}"
+                                )
+                                log.info(f"Penalty {penalty:.2f} applied to duplicate attempt {self.attempt_count} (count={dup_count}) - score {original_score:.2f} -> {score:.2f}")
                                 self.stats["Duplicate Attempts"] += 1
-                                continue # Skip to next attempt
+                                # Proceed with penalized score instead of skipping
                         # --- End Handle Duplicates ---
                         
                         # --- Update status message --- 

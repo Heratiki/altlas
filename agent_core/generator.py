@@ -561,6 +561,27 @@ class CodeGenerator:
                     # Apply softmax to get probabilities for sampling
                     probabilities = F.softmax(last_logits, dim=-1)
                     
+                    # DIAGNOSTIC: Log distribution details for debugging low-entropy issues
+                    if _ < 5:  # Only log for first few steps to avoid log bloat
+                        # Get top-k probability values and indices
+                        top_k = 5
+                        top_probs, top_indices = torch.topk(probabilities, k=min(top_k, probabilities.shape[0]))
+                        top_tokens = [self.tokenizer.id_to_token.get(idx.item(), "<UNK>") for idx in top_indices]
+                        
+                        # Format probability details for logging
+                        prob_details = ", ".join([f"{token}({idx.item()}): {prob.item():.4f}" 
+                                               for token, idx, prob in zip(top_tokens, top_indices, top_probs)])
+                        
+                        # Calculate statistics about the distribution
+                        prob_mean = probabilities.mean().item()
+                        prob_std = probabilities.std().item()
+                        prob_max = probabilities.max().item()
+                        prob_min = probabilities.min().item()
+                        
+                        logging.debug(f"Loop {_}: Probability stats - Mean: {prob_mean:.6f}, Std: {prob_std:.6f}, "
+                                    f"Max: {prob_max:.6f}, Min: {prob_min:.6f}")
+                        logging.debug(f"Loop {_}: Top {len(top_indices)} tokens: {prob_details}")
+                    
                     # Get token imbalance penalties from tokenizer
                     token_penalties = self.tokenizer.get_token_penalties(
                         penalty_factor=self.token_imbalance_penalty

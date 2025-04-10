@@ -767,7 +767,16 @@ class CodeGenerator:
     
             logging.debug(f"Returning from generate. Code type: {type(generated_code)}, Generated IDs shape: {generated_ids_tensor.shape}")
             logging.debug(f"Generated code: '{generated_code}'")
-    
+
+            # Check for empty or invalid generation
+            penalize_empty_generations = getattr(self, 'penalize_empty_generations', True)
+            if penalize_empty_generations:
+                if generated_ids_tensor.numel() == 0 or not generated_code.strip():
+                    logging.warning("Empty or invalid generation detected. Returning penalty signal.")
+                    # Optionally, set a penalty reward or error flag here
+                    # For now, return None to indicate failure
+                    return None, None
+
             return generated_code, generated_ids_tensor
 
         except Exception as e:

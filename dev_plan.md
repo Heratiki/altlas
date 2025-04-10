@@ -100,9 +100,12 @@ Each task below should be completed while preserving existing functionality. Tas
   - [✓] Implement gradient clipping to prevent training instability
   - [✓] Create dynamic entropy coefficient based on success rate
   - [✓] Create dynamic learning rate based on performance
+  - [✓] Add adaptive entropy-based early stopping with configurable minimum tokens before stop
+  - [✓] Inject optional noise into logits to encourage exploration (configurable)
+  - [✓] Dynamically increase temperature if repetitive token overuse is detected across recent generations
+  - [✓] Penalize and log empty or invalid generations to improve diagnostics and feedback
+  - [✓] Make all exploration and penalty mechanisms configurable, abstract, and token-agnostic
 
-  - [✓] Add penalty for token repetition within a single generated sequence (`RepetitionPenalty` config).
-  - [ ] Consider explicit entropy-based reward shaping for diversity (Partially covered by entropy bonus).
 - [✓] **3.3 Improve REINFORCE Implementation**
   - [✓] Verify correct gradient flow and parameter updates (added logging)
   - [✓] Add baseline for variance reduction (EMA baseline)

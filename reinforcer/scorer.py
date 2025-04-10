@@ -158,6 +158,12 @@ class AttemptScorer:
             # Use word boundaries (\b) to match whole tokens
             normalized_code = re.sub(r'\b' + re.escape(abstract) + r'\b', literal, normalized_code)
             
+        # Optional debug snapshot
+        if getattr(self, 'debug_mode', False):
+            logging.debug(f"[DEBUG] Target language: {target_language}")
+            logging.debug(f"[DEBUG] Abstract tokens: {decoded_code}")
+            logging.debug(f"[DEBUG] Decoded source code:\n{normalized_code}")
+
         return normalized_code
 
     def score(self, code_attempt: str, result, task) -> float:

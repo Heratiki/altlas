@@ -127,6 +127,8 @@ class ConfigLoader:
                 'timeout': llm_config.getint('Timeout', 120),
                 'temperature': llm_config.getfloat('Temperature', 0.7),
                 'max_tokens': llm_config.getint('MaxTokens', 500),
+                'tier': llm_config.get('Tier', 'local'),
+                'route_label': 'default',
             }
         except (KeyError, ValueError) as e:
             log.error(f"Error parsing LLM configuration: {e}")
@@ -139,7 +141,46 @@ class ConfigLoader:
                 'timeout': 120,
                 'temperature': 0.7,
                 'max_tokens': 500,
+                'tier': 'local',
+                'route_label': 'default',
             }
+
+    def get_model_router_config(self):
+        """
+        Build role-based LLM configuration for the model router.
+
+        Sections named `LLM.Role.<role>` inherit from `[LLM]` and override
+        provider settings for that specific role.
+        """
+        default_config = self.get_llm_config()
+        role_configs = {}
+
+        for section_name in self.config.sections():
+            if not section_name.startswith("LLM.Role."):
+                continue
+
+            role_name = section_name.split("LLM.Role.", 1)[1].strip().lower()
+            section = self.config[section_name]
+
+            model_pref_str = section.get('ModelPreference', ",".join(default_config.get('model_preference', [])))
+            model_preference = [m.strip() for m in model_pref_str.split(',') if m.strip()]
+
+            role_configs[role_name] = {
+                'provider': section.get('Provider', default_config.get('provider', 'vllm')),
+                'vllm_base_url': section.get('vLLMBaseURL', default_config.get('vllm_base_url', 'http://localhost:8000/v1')),
+                'lmstudio_base_url': section.get('LMStudioBaseURL', default_config.get('lmstudio_base_url', 'http://localhost:1234/v1')),
+                'model_preference': model_preference or default_config.get('model_preference', []),
+                'timeout': section.getint('Timeout', default_config.get('timeout', 120)),
+                'temperature': section.getfloat('Temperature', default_config.get('temperature', 0.7)),
+                'max_tokens': section.getint('MaxTokens', default_config.get('max_tokens', 500)),
+                'tier': section.get('Tier', default_config.get('tier', 'local')),
+                'route_label': section.get('RouteLabel', role_name),
+            }
+
+        return {
+            'default': default_config,
+            'roles': role_configs,
+        }
     
     def get_config_path(self):
         """

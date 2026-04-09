@@ -26,9 +26,10 @@ from typing import Dict, List, Any, Optional, Tuple
 DEFAULT_PLACEHOLDER = "N/A"
 
 class TrainingReportGenerator:
-    def __init__(self, report_dir="memory/reports", template_path="training_report.md", llm_config=None):
+    def __init__(self, report_dir="memory/reports", template_path="training_report.md", llm_config=None, model_router=None):
         try:
-            self.llm_provider = LLMProvider(config=llm_config)
+            self.model_router = model_router
+            self.llm_provider = None if model_router else LLMProvider(config=llm_config)
             self.report_dir = Path(report_dir).resolve() # Resolve path immediately
             # Resolve template path relative to project root (parent of this file's parent)
             project_root = Path(__file__).parent.parent.resolve()
@@ -438,7 +439,10 @@ Based on this data, please provide:
 Format your response with clear section headers and bullet points where appropriate.
 """
         # Call the local LLM for analysis
-        observations = self.llm_provider.generate(prompt)
+        if self.model_router:
+            observations = self.model_router.generate("analyst", prompt)
+        else:
+            observations = self.llm_provider.generate(prompt)
         
         # If observations were generated successfully
         if observations and not observations.startswith("Error"):
@@ -547,7 +551,10 @@ Format your response with clear section headers and bullet points where appropri
 
             # --- Prepare Data Dictionary for Template ---
             # --- Fetch LLM Provider Stats ---
-            llm_stats = self.llm_provider.get_stats() if self.llm_provider else {}
+            if self.model_router:
+                llm_stats = self.model_router.get_role_stats("analyst")
+            else:
+                llm_stats = self.llm_provider.get_stats() if self.llm_provider else {}
 
             report_data = {
                 'timestamp': timestamp_str,

@@ -1,102 +1,77 @@
-# AltLAS - Autonomous Learning Task Agent System
+# AltLAS
 
-## Overview
+AltLAS is an experimental autonomous coding system. The repository now combines two ideas that were previously mixed together: a research loop for bottom-up learning, and a practical agent stack for generation, execution, scoring, reporting, and provider-backed assistance.
 
-AltLAS is an experimental system designed to explore emergent learning in AI agents. The goal is to create an agent that learns to solve programming tasks through reinforcement learning, starting with minimal prior knowledge and developing its own coding approach.
+This refresh reflects the current 2026 model landscape. Strong local and open models, longer context windows, multimodal inputs, tool use, and cheaper hosted reasoning all change what “bootstrapping” should mean. AltLAS should be designed as a hybrid system, not as a single isolated learner.
 
-This system uses a PyTorch-based RNN (LSTM) model trained with the REINFORCE algorithm (with baseline and entropy regularization) to generate code attempts.
+## Current State
 
-Each task is defined in a JSON file that includes not only the expected output but also valid solution patterns and constraints. This allows the system to recognize multiple valid approaches to solving a problem while ensuring core requirements (like specific operators or values) are met.
+Implemented in this repository today:
 
-## Setup
+- PyTorch-based sequence generator and training loop
+- benchmark-style task definitions under `task/`
+- execution, scoring, safety, duplicate detection, and reporting
+- terminal UI and resumable runs
+- provider hooks for local inference via LM Studio and vLLM
+- language execution maps for Python-first, multi-language experimentation
 
-This project is designed to run within a development container.
+Not mature yet:
 
-1.  **Prerequisites:** Docker and VS Code with the "Dev Containers" extension.
-2.  **Open in Container:** Open the project folder in VS Code and use the command palette (`Ctrl+Shift+P`) to run "Dev Containers: Reopen in Container". This will build the Docker image defined in `.devcontainer/Dockerfile` (which includes Python, PyTorch with CUDA support if available) and start the container.
-3.  **Verification:** Once the container is running, you can verify the PyTorch installation by opening a terminal in VS Code (`Ctrl+\``) and running:
-    ```bash
-    python -c "import torch; print(f'PyTorch Version: {torch.__version__}'); print(f'CUDA Available: {torch.cuda.is_available()}')"
-    ```
+- rigorous automated eval harness
+- robust resource enforcement in the executor
+- dependable model routing across local and hosted providers
+- reliable task solving beyond basic experiments
 
-## Configuration
+## Quick Start
 
-Key hyperparameters, paths, and settings are managed in the `config.ini` file. This includes:
+The project is designed for the devcontainer in `.devcontainer/`.
 
-*   `[Runner]`: Max attempts, stuck detection parameters, hint probability, logging frequency.
-*   `[Model]`: RNN/LSTM dimensions (embedding, hidden layers).
-*   `[Optimizer]`: Learning rate, entropy coefficient, gradient clipping norm, baseline EMA alpha.
-*   `[Executor]`: Code execution timeout.
-*   `[Scorer]`: Task success threshold.
-*   `[Paths]`: Locations for vocabulary, model state, optimizer state.
+```bash
+python runner.py --task benchmark_add_two_numbers
+python runner.py --task benchmark_add_two_numbers --debug
+python runner.py --task benchmark_add_two_numbers --reset
+./start_altlas.sh
+```
 
-Review and adjust these parameters as needed before running experiments.
+Primary entrypoints:
 
-## Running the Agent
+- `runner.py`: orchestration and training run startup
+- `altlas_ui.py`: terminal task picker and launcher
+- `config.ini`: runtime, model, optimizer, logging, and provider settings
 
-The main script to run the agent is `runner.py`.
+## Repository Layout
 
-1.  **Open Terminal:** Use the integrated terminal in VS Code (`Ctrl+\``).
-2.  **Run Command:** Execute the runner script, optionally specifying a task:
-    ```bash
-    python runner.py [--task <task_name>]
-    ```
-    *   `--task <task_name>`: Specifies the task to run. The `<task_name>` corresponds to a JSON file in the `task/` directory or its subdirectories (e.g., `task/benchmarks/`). Do not include the `.json` extension.
-    *   If `--task` is omitted, it defaults to `hello_world`.
+- `agent_core/`: generation model and code synthesis logic
+- `core/`: config loading, UI, attempt management, training loop
+- `evaluator/`: code execution
+- `guardian/`: safety checks
+- `reinforcer/`: scoring and tool feedback
+- `task/`: benchmark and task definitions
+- `memory/`: state, reports, and persisted artifacts
+- `language_maps/`: language execution metadata
 
-3.  **Available Tasks:**
-    *   `hello_world`: A simple task requiring the agent to print "hello world". Found in `task/hello_world.json` (implicitly, needs to be created or loaded dynamically by TaskLoader improvements).
-    *   `benchmark_add_two_numbers`: A benchmark task demonstrating pattern-based task definition. It requires the agent to print the sum of 5 and 3 (output "8") while accepting multiple valid solution approaches like direct addition, variable-based addition, or function-based solutions. Found in `task/benchmarks/benchmark_add_two_numbers.json`.
+## Design Direction
 
-## Task Definition
+AltLAS now targets a capability-based architecture:
 
-Tasks are defined in JSON files with the following structure:
-* `name`: Task identifier
-* `description`: Human-readable task description
-* `success_criteria`:
-  * `type`: Type of validation (e.g., "code_pattern", "exact_output")
-  * `expected_output`: Expected program output
-  * `valid_patterns`: Array of acceptable solution patterns and variations
-  * `case_sensitive`: Whether output matching is case-sensitive
-  * `whitespace_sensitive`: Whether whitespace matters in pattern matching
-* `constraints`: Optional requirements like:
-  * `required_operators`: Operators that must be used
-  * `required_numbers`: Numbers that must appear in the solution
-  * `max_tokens`: Maximum tokens allowed in solution
-* `difficulty`: Task difficulty level (e.g., "beginner", "intermediate")
+- local models for cheap iteration and private execution
+- stronger hosted models for planning, critique, repair, and distillation
+- deterministic tools for execution, verification, and measurement
+- eval-driven routing instead of hard-coding one “best” model path
 
-## Key Features
+See the updated design docs:
 
-The AltLAS system includes several advanced techniques to improve code generation:
+- `AltLAS_Project_Guide.md`
+- `dev_plan.md`
+- `docs/architecture-2026.md`
+- `docs/model-strategy.md`
+- `docs/evals.md`
 
-* **Temperature-Controlled Sampling**: Dynamically adjusts randomness in token selection based on the current score, with more focused sampling when scores improve.
+## Development Priorities
 
-* **Grammar-Guided Generation**: Uses Python grammar rules to boost probabilities of grammatically valid tokens, helping the model generate syntactically correct code.
+The next practical work is:
 
-* **Template-Guided Generation**: For benchmark tasks, the system can leverage templates when stuck, guiding the model toward valid solution patterns.
-
-* **Weight Reset Mechanism**: Automatically reinitializes model weights when stuck in a bad local minimum for too long.
-
-* **Beam Search Generation**: When standard generation struggles, the system uses beam search to explore multiple candidate sequences simultaneously, choosing the most promising one.
-
-* **Dynamic Entropy Regularization**: Adjusts exploration vs. exploitation based on success rate, encouraging exploration early and focusing on successful patterns as training progresses.
-
-## Understanding the Output
-
-*   **Rich UI:** The script uses the `rich` library to display a live dashboard in the terminal, showing:
-    *   Overall progress.
-    *   Current statistics (attempt count, scores, duplicates, errors, hints).
-    *   Recent status messages.
-    *   Current advisor hint (if active).
-*   **Logs:** Detailed information, including weight initialization, validation checks, learning steps (loss, gradient norm), periodic token frequencies, and errors, are printed to the console/standard output.
-*   **Final Summary:** At the end of the run, a summary panel shows overall results and statistics. It will also indicate if the run was interrupted early by the user (Ctrl+C).
-*   **Final Token Frequencies:** A table showing the frequency of each token generated during the run is printed.
-*   **Saved State:** Model and optimizer states are saved to files specified in `config.ini` (default: `memory/model_state.pth`, `memory/optimizer_state.pth`). **Note:** State is saved upon successful completion, reaching max attempts, or clean user interruption (Ctrl+C). State is *not* saved if the run terminates due to an unexpected error.
-*   **Best Attempt:** The code corresponding to the best score achieved during the run is saved to `memory/logs/best_attempt.json`.
-*   **Interrupting:** You can stop a run early by pressing `Ctrl+C` in the terminal. The current progress (model/optimizer state) will be saved if the interruption is handled cleanly.
-
-## Development
-
-*   **Development Plan:** See `dev_plan.md` for the ongoing development roadmap, completed tasks, and future plans.
-*   **PyTorch Transition:** See `pytorch_transition_plan.md` for details on the transition to the PyTorch framework.
-*   **Project Guide:** See `AltLAS_Project_Guide.md` for overarching project goals and philosophies.
+1. build a real benchmark and regression harness
+2. harden execution limits and error reporting
+3. separate research-mode learning from production-style agent workflows
+4. introduce a model router with explicit local, hosted, and specialist roles

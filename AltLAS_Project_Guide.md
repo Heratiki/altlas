@@ -1,77 +1,52 @@
-# 🧠 AltLAS Project Guide
+# AltLAS Project Guide
 
-> *AltLAS: Loses A Lot, Succeeds*
+## Purpose
 
-## 🧾 Project Purpose
+AltLAS exists to explore autonomous code-solving systems that can improve through execution feedback, memory, evaluation, and model-assisted iteration. It is no longer accurate to describe the project as a purely isolated learner. The codebase already contains a hybrid stack, and the design should acknowledge that directly.
 
-AltLAS is a sandboxed, emergent coding agent that learns how to solve programming tasks via trial, failure, reinforcement, and adaptation. It starts with no knowledge and gradually evolves intelligent behavior. It is *not* a traditional LLM wrapper—AltLAS is a bottom-up learner.
+## Two Tracks
 
----
+AltLAS now has two legitimate tracks:
 
-## 🧱 System Architecture (High-Level)
+### 1. Research Track
 
-### 1. `runner.py`
-- Main orchestrator loop
-- Executes attempts, scores them, logs them
-- Stops on success or loop-detection
+Use reinforcement learning, replay, reward shaping, and structured tasks to study whether a compact generator can improve through repeated attempts and tool feedback.
 
-### 2. `agent_core/`
-- `generator.py`: Generates new code attempts
-- Can start with rule-based output and evolve over time
+### 2. Systems Track
 
-### 3. `task/`
-- Contains task definitions and goals
-- Example: `hello_world.py` defines success as outputting "hello world"
+Build a modern coding agent that routes work across local models, hosted models, deterministic tools, and evaluators while remaining measurable, debuggable, and safe.
 
-### 4. `evaluator/`
-- `executor.py`: Runs the generated code in a sandbox (Docker container)
-- Captures stdout/stderr
+These tracks should share infrastructure, but they should not be confused with each other.
 
-### 5. `reinforcer/`
-- `scorer.py`: Compares output to task criteria and returns reward (0.0–1.0)
+## Design Principles
 
-### 6. `guardian/`
-- `safety.py`: Filters unsafe or redundant code attempts before execution
+- **Capability-based, not model-branded**: architecture should be written around planner, coder, critic, judge, retriever, and safety roles.
+- **Provider-agnostic**: local inference, hosted APIs, and future engines should fit behind one routing layer.
+- **Eval-first**: benchmark and regression results matter more than intuition about model quality.
+- **Local-first where practical**: private and inexpensive loops should prefer local models and deterministic tooling.
+- **Safe execution by default**: generated code must run in constrained environments with explicit policy checks.
+- **Clear separation of concerns**: orchestration, generation, execution, scoring, memory, and reporting remain modular.
 
-### 7. `memory/`
-- `logger.py`: Stores useful attempt data, deletes junk
-- `fingerprints.py`: Prevents repeating the same failures endlessly
+## What Exists Today
 
----
+- a PyTorch generator and training loop
+- benchmark tasks in JSON
+- execution, scoring, safety, and duplicate detection
+- report generation and run persistence
+- an LLM provider abstraction aimed at local engines such as LM Studio and vLLM
 
-## 🧠 Key Philosophies
+## What AltLAS Should Become
 
-- Reward-worthy behavior is logged; junk is discarded.
-- Fingerprinting prevents infinite loops of same code.
-- LLMs (Claude, Gemini, etc.) are used **only if needed** and at AltLAS' request.
-- Eventually, AltLAS may design its own language, DSLs, or problem abstractions.
+The intended 2026 design is a layered system:
 
----
+1. interface and orchestration
+2. model router
+3. planning and coding agents
+4. deterministic tools and sandboxed execution
+5. evaluators and judges
+6. memory, traces, and reports
+7. learning and distillation loops fed by evals
 
-## 🧪 Training Workflow
+## Practical Rule
 
-1. Generate code (`agent_core`)
-2. Check for safety + novelty (`guardian`)
-3. Execute safely (`evaluator`)
-4. Score result (`reinforcer`)
-5. Log if valuable (`memory`)
-6. Repeat or halt
-
----
-
-## 🧩 Future Modules
-
-- `orchestrator/` – for routing multiple tasks
-- `critic/` – for self-analysis and reward hacking prevention
-- `vector_store/` – if vector embeddings are needed
-- `model_team/` – LLM advisors once AltLAS matures
-
----
-
-## 💭 Notes for Copilot / Roo Code
-
-- Do not overuse classes unless needed. Start simple and composable.
-- Always assume the agent is stupid until it earns abstraction.
-- Modularize so future behavior evolution is painless.
-- Use minimal dependencies outside of ONNX, numpy, Docker, and Python stdlib.
-
+If a feature improves observability, execution safety, or evaluation quality, it is foundational work. If a feature adds model complexity without improving measurement, it is probably premature.

@@ -11,6 +11,12 @@ import configparser
 from pathlib import Path
 import logging
 import json
+import re
+
+try:
+    import resource
+except ImportError:
+    resource = None
 
 @dataclass
 class ExecutionResult:
@@ -22,6 +28,8 @@ class ExecutionResult:
     exit_code: int
     code: str = ""  # Store the code that was executed
     exception: str = None
+    error: str = ""
+    error_type: str = ""
 
 class CodeExecutor:
     """Executes code attempts safely and returns results."""
@@ -73,31 +81,54 @@ class CodeExecutor:
             except Exception as e:
                 logging.error(f"Error loading language execution configuration: {e}")
         
-    def execute(self, code, language="python"):
+    def _extract_error_type(self, error_text: str, fallback: str = "ExecutionError") -> str:
+        """Extract a stable error type label from stderr or an exception message."""
+        if not error_text:
+            return fallback
+
+        for line in reversed(error_text.splitlines()):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            match = re.match(r"([A-Za-z_][A-Za-z0-9_]*Error|[A-Za-z_][A-Za-z0-9_]*)", stripped)
+            if match:
+                return match.group(1)
+
+        return fallback
+
+    def _build_preexec_fn(self, resource_limits):
+        """Create a POSIX pre-exec function for CPU and memory limits."""
+        if not resource_limits or os.name == "nt" or resource is None:
+            return None
+
+        memory_limit_mb = resource_limits.get("memory_limit")
+        cpu_limit_seconds = resource_limits.get("cpu_limit")
+
+        if memory_limit_mb is None and cpu_limit_seconds is None:
+            return None
+
+        def _apply_limits():
+            if memory_limit_mb is not None:
+                memory_bytes = int(memory_limit_mb) * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+            if cpu_limit_seconds is not None:
+                cpu_seconds = max(1, int(cpu_limit_seconds))
+                resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+
+        return _apply_limits
+
+    def execute(self, code, language="python", timeout=None, resource_limits=None):
         """Execute the provided code and return the results.
         """
         if getattr(self, 'debug_mode', False):
             logging.debug(f"[DEBUG] Executing code in language: {language}")
-        """Execute the provided code and return the results.
-        """
         if getattr(self, 'debug_mode', False):
             logging.debug(f"[DEBUG] Executing code in language: {language}")
             logging.debug(f"[DEBUG] Code to execute:\n{code}")
 
-        # (rest of execute logic...)
-
-            logging.debug(f"[DEBUG] Code to execute:\n{code}")
-        """
-        Args:
-            code (str): The code to execute.
-            language (str): The programming language of the code (e.g., "python", "javascript").
-                           Defaults to "python" for backward compatibility.
-            
-        Returns:
-            ExecutionResult: The results of the execution.
-        """
         # Normalize language name to lowercase
         language = language.lower()
+        effective_timeout = timeout if timeout is not None else self.timeout
         
         # Get the appropriate file extension for the language
         file_extension = self._language_extension_map.get(language, ".txt")
@@ -125,24 +156,31 @@ class CodeExecutor:
                 command + [temp_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                preexec_fn=self._build_preexec_fn(resource_limits),
             )
             
             try:
-                stdout, stderr = process.communicate(timeout=self.timeout)
+                stdout, stderr = process.communicate(timeout=effective_timeout)
                 exit_code = process.returncode
                 status = 'success' if exit_code == 0 else 'error'
+                error = stderr.strip() if status == 'error' else ""
+                error_type = self._extract_error_type(error, fallback="ExecutionError") if error else ""
             except subprocess.TimeoutExpired:
                 process.kill()
                 stdout, stderr = process.communicate()
                 exit_code = -1
                 status = 'timeout'
+                error = f"Execution timed out after {effective_timeout} seconds."
+                error_type = "TimeoutError"
                 
         except Exception as e:
             status = 'error'
             stdout = ''
             stderr = str(e)
             exit_code = -1
+            error = str(e)
+            error_type = type(e).__name__
         finally:
             # Clean up the temporary file
             if os.path.exists(temp_path):
@@ -156,7 +194,10 @@ class CodeExecutor:
             stderr=stderr.strip(),
             runtime=runtime,
             exit_code=exit_code,
-            code=code  # Include the original code
+            code=code,
+            exception=stderr if status == "error" else None,
+            error=error if 'error' in locals() else "",
+            error_type=error_type if 'error_type' in locals() else "",
         )
 
         # After execution, log results

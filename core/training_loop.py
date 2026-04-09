@@ -15,6 +15,7 @@ import statistics # Added for mean/stdev
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from llm_provider import LLMProvider
+from core.model_router import ModelRouter
 
 # Import necessary components (adjust paths as needed)
 from agent_core.generator import CodeGenerator
@@ -42,6 +43,7 @@ class TrainingLoop:
                  executor: CodeExecutor,
                  scorer: AttemptScorer,
                  report_generator: TrainingReportGenerator,
+                 model_router: Optional[ModelRouter],
                  current_task: Task,
                  device: str):
         """
@@ -67,12 +69,13 @@ class TrainingLoop:
         self.executor = executor
         self.scorer = scorer
         self.report_generator = report_generator
+        self.model_router = model_router
         self.current_task = current_task
         self.device = device
         
         # Initialize LLM Provider
         llm_config = self.config_loader.get_llm_config()
-        self.llm_provider = LLMProvider(config=llm_config)
+        self.llm_provider = None if model_router else LLMProvider(config=llm_config)
         
         # Load configurations
         self.runner_config = self.config_loader.get_runner_config()
@@ -213,7 +216,13 @@ class TrainingLoop:
                         is_duplicate = self.attempt_manager.is_duplicate(fingerprint)
                         
                         # --- Execute Code --- 
-                        result = self.executor.execute(code_attempt, language=self.current_task.target_language)
+                        task_limits = getattr(self.current_task, 'resource_limits', {}) or {}
+                        result = self.executor.execute(
+                            code_attempt,
+                            language=self.current_task.target_language,
+                            timeout=task_limits.get('timeout'),
+                            resource_limits=task_limits,
+                        )
                         
                         # --- Score Result --- 
                         score = self.scorer.score(code_attempt, result, self.current_task)
@@ -944,7 +953,10 @@ Provide ONLY the hint without explanation:
 """
             
             # Call the LLM API
-            hint = self.llm_provider.generate(prompt)
+            if self.model_router:
+                hint = self.model_router.generate("advisor", prompt)
+            else:
+                hint = self.llm_provider.generate(prompt)
             
             if hint:
                 # Post-process the hint to ensure brevity

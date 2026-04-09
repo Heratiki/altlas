@@ -2,9 +2,9 @@
 Task loader module that loads and manages task definitions.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 # import os # Removed os import as it is not used
 import json
 import logging # Import logging
@@ -18,8 +18,11 @@ class Task:
     name: str
     description: str
     success_criteria: dict
-    max_tokens: Optional[int] = None  # New field with default None
-    target_language: str = "python"  # Default to python for backward compatibility
+    max_tokens: Optional[int] = None
+    target_language: str = "python"
+    constraints: Dict[str, Any] = field(default_factory=dict)
+    difficulty: str = "unknown"
+    resource_limits: Dict[str, Any] = field(default_factory=dict)
     
     def __str__(self):
         return f"Task: {self.name} - {self.description}"
@@ -31,6 +34,18 @@ class TaskLoader:
         # Base directory for tasks is the directory containing this script
         self.tasks_dir = Path(__file__).parent.absolute()
         logging.info(f"TaskLoader initialized. Searching for tasks in: {self.tasks_dir}")
+
+    def list_task_names(self, subdirectory: Optional[str] = None) -> List[str]:
+        """List available task names, optionally scoped to a subdirectory."""
+        search_root = self.tasks_dir / subdirectory if subdirectory else self.tasks_dir
+        if not search_root.exists():
+            logging.warning(f"Requested task subdirectory does not exist: {search_root}")
+            return []
+
+        task_names = []
+        for filepath in search_root.rglob("*.json"):
+            task_names.append(filepath.stem)
+        return sorted(task_names)
         
     def find_task_file(self, task_name: str) -> Optional[Path]:
         """Search for task_name.json recursively within the tasks directory."""
@@ -65,13 +80,22 @@ class TaskLoader:
             target_language = task_data.get("target_language", "python")
             logging.info(f"Task '{task_name}' has target language: {target_language}")
 
+            constraints = task_data.get("constraints", {})
+            resource_limits = task_data.get("resource_limits", {})
+            max_tokens = task_data.get("max_tokens")
+            if max_tokens is None:
+                max_tokens = constraints.get("max_tokens")
+
             # Create Task object with optional max_tokens and target_language
             task = Task(
                 name=task_name,  # Use the requested name
                 description=task_data["description"],
                 success_criteria=task_data["success_criteria"],
-                max_tokens=task_data.get("max_tokens"),  # Will be None if not specified
-                target_language=target_language
+                max_tokens=max_tokens,
+                target_language=target_language,
+                constraints=constraints,
+                difficulty=task_data.get("difficulty", "unknown"),
+                resource_limits=resource_limits,
             )
             
             if task.max_tokens is not None:

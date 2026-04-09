@@ -26,6 +26,7 @@ from core.config_loader import ConfigLoader
 from core.ui_display import UIDisplay
 from core.attempt_manager import AttemptManager
 from core.training_loop import TrainingLoop
+from core.model_router import ModelRouter
 
 # Import other necessary components
 from agent_core.generator import CodeGenerator
@@ -202,7 +203,12 @@ def main():
         executor = CodeExecutor(config_path=config_path_str)
         scorer = AttemptScorer(config_path=config_path_str)
         llm_config = config_loader.get_llm_config()
-        report_generator = TrainingReportGenerator(llm_config=llm_config)
+        model_router_config = config_loader.get_model_router_config()
+        model_router = ModelRouter(
+            default_config=model_router_config.get("default", {}),
+            role_configs=model_router_config.get("roles", {}),
+        )
+        report_generator = TrainingReportGenerator(llm_config=llm_config, model_router=model_router)
         # --- End AltLAS Component Initialization ---
 
         # --- Initialize Training Loop ---
@@ -215,6 +221,7 @@ def main():
             executor=executor,
             scorer=scorer,
             report_generator=report_generator,
+            model_router=model_router,
             current_task=current_task,
             device=device
         )

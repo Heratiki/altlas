@@ -99,3 +99,10 @@ memory/state.json
 deprecated/
 memory/fingerprints.json
 .roomodes
+
+# Orchestration
+.unlazy/
+.unlazy-hook-state.json
+.claude/worktrees/
+.claude/settings.local.json
+.scratch/

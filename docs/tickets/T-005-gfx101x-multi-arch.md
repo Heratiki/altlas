@@ -1,6 +1,6 @@
 # T-005: Move the gfx101x extra to AMD's multi-arch gfx1010 build
 
-Status: open
+Status: landed (worktree-agent-a1533722df52ec416, 2026-10-29)
 Opened: 2026-10-29 by the orchestrator, from maintainer ruling R9 and host tests of 2026-10-29.
 Depends on: T-004 (gfx101x extra, MIOpen-off logic), T-001 (uv packaging)
 

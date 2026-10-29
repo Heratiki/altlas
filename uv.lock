@@ -92,29 +92,45 @@ cpu = [
     { name = "torch", version = "2.15.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'linux' and extra == 'extra-6-altlas-cpu') or (extra == 'extra-6-altlas-cpu' and extra == 'extra-6-altlas-gfx101x')" },
 ]
 gfx101x = [
-    { name = "rocm", extra = ["libraries"], marker = "extra == 'extra-6-altlas-gfx101x'" },
+    { name = "amd-torch-device-gfx1010" },
+    { name = "rocm" },
     { name = "rocm-sdk-core" },
-    { name = "rocm-sdk-libraries-gfx101x-dgpu" },
-    { name = "torch", version = "2.12.0+rocm7.14.0a20260612", source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" } },
+    { name = "rocm-sdk-device-gfx1010" },
+    { name = "rocm-sdk-libraries" },
+    { name = "torch", version = "2.14.0+rocm10.1.0a20260822", source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" } },
     { name = "triton" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp" },
+    { name = "amd-torch-device-gfx1010", marker = "extra == 'gfx101x'", specifier = "==2.14.0+rocm10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "requests" },
     { name = "rich" },
-    { name = "rocm", extras = ["libraries"], marker = "extra == 'gfx101x'", specifier = "==7.14.0a20260612", index = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/", conflict = { package = "altlas", extra = "gfx101x" } },
-    { name = "rocm-sdk-core", marker = "extra == 'gfx101x'", specifier = "==7.14.0a20260612", index = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/", conflict = { package = "altlas", extra = "gfx101x" } },
-    { name = "rocm-sdk-libraries-gfx101x-dgpu", marker = "extra == 'gfx101x'", specifier = "==7.14.0a20260612", index = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "rocm", marker = "extra == 'gfx101x'", specifier = "==10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "rocm-sdk-core", marker = "extra == 'gfx101x'", specifier = "==10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "rocm-sdk-device-gfx1010", marker = "extra == 'gfx101x'", specifier = "==10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "rocm-sdk-libraries", marker = "extra == 'gfx101x'", specifier = "==10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'cpu'", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "altlas", extra = "cpu" } },
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'cpu'" },
-    { name = "torch", marker = "extra == 'gfx101x'", specifier = "==2.12.0+rocm7.14.0a20260612", index = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/", conflict = { package = "altlas", extra = "gfx101x" } },
-    { name = "triton", marker = "extra == 'gfx101x'", specifier = "==3.7.0+gitb4e20bbe.rocm7.14.0a20260612", index = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "torch", marker = "extra == 'gfx101x'", specifier = "==2.14.0+rocm10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
+    { name = "triton", marker = "extra == 'gfx101x'", specifier = "==3.8.0+git675c5987.rocm10.1.0a20260822", index = "https://rocm.nightlies.amd.com/whl-multi-arch/", conflict = { package = "altlas", extra = "gfx101x" } },
 ]
 provides-extras = ["cpu", "gfx101x"]
+
+[[package]]
+name = "amd-torch-device-gfx1010"
+version = "2.14.0+rocm10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
+dependencies = [
+    { name = "rocm-sdk-device-gfx1010" },
+    { name = "torch", version = "2.14.0+rocm10.1.0a20260822", source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" } },
+]
+wheels = [
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/amd_torch_device_gfx1010-2.14.0%2Brocm10.1.0a20260822-cp313-cp313-linux_x86_64.whl" },
+]
 
 [[package]]
 name = "attrs"
@@ -596,53 +612,60 @@ wheels = [
 
 [[package]]
 name = "rocm"
-version = "7.14.0a20260612"
-source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" }
+version = "10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
 dependencies = [
     { name = "rocm-sdk-core" },
 ]
-sdist = { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/rocm-7.14.0a20260612.tar.gz" }
+sdist = { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm-10.1.0a20260822.tar.gz" }
 
 [package.optional-dependencies]
 libraries = [
-    { name = "rocm-sdk-libraries-gfx101x-dgpu" },
+    { name = "rocm-sdk-libraries" },
+]
+
+[[package]]
+name = "rocm-bootstrap"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/b6/30144880b8e2bad4e9991b08352c7cec17931b5d26b1f9108192f4f17d91/rocm_bootstrap-0.3.0-py3-none-any.whl", hash = "sha256:62d0160ecdd86f7132dbab9aec257cb2c96327df2592b0633aa6bb56399cc095", size = 30532 },
 ]
 
 [[package]]
 name = "rocm-sdk-core"
-version = "7.14.0a20260612"
-source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" }
+version = "10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
 wheels = [
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/rocm_sdk_core-7.14.0a20260612-py3-none-linux_x86_64.whl" },
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/rocm_sdk_core-7.14.0a20260612-py3-none-win_amd64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260822-py3-none-linux_x86_64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_core-10.1.0a20260822-py3-none-win_amd64.whl" },
 ]
 
 [[package]]
-name = "rocm-sdk-libraries-gfx101x-dgpu"
-version = "7.14.0a20260612"
-source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" }
+name = "rocm-sdk-device-gfx1010"
+version = "10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
+dependencies = [
+    { name = "rocm-sdk-libraries" },
+]
 wheels = [
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/rocm_sdk_libraries_gfx101x_dgpu-7.14.0a20260612-py3-none-linux_x86_64.whl" },
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/rocm_sdk_libraries_gfx101x_dgpu-7.14.0a20260612-py3-none-win_amd64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_device_gfx1010-10.1.0a20260822-py3-none-linux_x86_64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_device_gfx1010-10.1.0a20260822-py3-none-win_amd64.whl" },
 ]
 
 [[package]]
-name = "setuptools"
-version = "81.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0d/1c/73e719955c59b8e424d015ab450f51c0af856ae46ea2da83eba51cc88de1/setuptools-81.0.0.tar.gz", hash = "sha256:487b53915f52501f0a79ccfd0c02c165ffe06631443a886740b91af4b7a5845a", size = 1198299 }
+name = "rocm-sdk-libraries"
+version = "10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl", hash = "sha256:fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6", size = 1062021 },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_libraries-10.1.0a20260822-py3-none-linux_x86_64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/rocm_sdk_libraries-10.1.0a20260822-py3-none-win_amd64.whl" },
 ]
 
 [[package]]
 name = "setuptools"
 version = "84.2.1"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "sys_platform == 'linux'",
-    "sys_platform != 'linux'",
-]
 sdist = { url = "https://files.pythonhosted.org/packages/70/b3/c19426f783614d625699a4b247faf628ea9ab1db228674491767b417f9e1/setuptools-84.2.1.tar.gz", hash = "sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc", size = 1230289 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/55/6dc6d6bb953bdfc52519a0059592c52b6e3b8ad51cf8256dffceb55b0610/setuptools-84.2.1-py3-none-any.whl", hash = "sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2", size = 876263 },
@@ -671,22 +694,22 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.12.0+rocm7.14.0a20260612"
-source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" }
+version = "2.14.0+rocm10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
 dependencies = [
     { name = "filelock" },
     { name = "fsspec" },
     { name = "jinja2" },
     { name = "networkx" },
     { name = "rocm", extra = ["libraries"], marker = "extra == 'extra-6-altlas-gfx101x'" },
-    { name = "setuptools", version = "81.0.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "rocm-bootstrap" },
+    { name = "setuptools" },
     { name = "sympy" },
     { name = "triton" },
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/torch-2.12.0%2Brocm7.14.0a20260612-cp313-cp313-linux_x86_64.whl" },
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/torch-2.12.0%2Brocm7.14.0a20260612-cp313-cp313-win_amd64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/torch-2.14.0%2Brocm10.1.0a20260822-cp313-cp313-linux_x86_64.whl" },
 ]
 
 [[package]]
@@ -701,7 +724,7 @@ dependencies = [
     { name = "fsspec", marker = "sys_platform != 'linux'" },
     { name = "jinja2", marker = "sys_platform != 'linux'" },
     { name = "networkx", marker = "sys_platform != 'linux'" },
-    { name = "setuptools", version = "84.2.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'linux'" },
+    { name = "setuptools", marker = "sys_platform != 'linux'" },
     { name = "sympy", marker = "sys_platform != 'linux'" },
     { name = "typing-extensions", marker = "sys_platform != 'linux'" },
 ]
@@ -724,7 +747,7 @@ dependencies = [
     { name = "fsspec", marker = "sys_platform == 'linux'" },
     { name = "jinja2", marker = "sys_platform == 'linux'" },
     { name = "networkx", marker = "sys_platform == 'linux'" },
-    { name = "setuptools", version = "84.2.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'linux'" },
+    { name = "setuptools", marker = "sys_platform == 'linux'" },
     { name = "sympy", marker = "sys_platform == 'linux'" },
     { name = "typing-extensions", marker = "sys_platform == 'linux'" },
 ]
@@ -738,10 +761,10 @@ wheels = [
 
 [[package]]
 name = "triton"
-version = "3.7.0+gitb4e20bbe.rocm7.14.0a20260612"
-source = { registry = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/" }
+version = "3.8.0+git675c5987.rocm10.1.0a20260822"
+source = { registry = "https://rocm.nightlies.amd.com/whl-multi-arch/" }
 wheels = [
-    { url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/triton-3.7.0%2Bgitb4e20bbe.rocm7.14.0a20260612-cp313-cp313-linux_x86_64.whl" },
+    { url = "https://rocm.nightlies.amd.com/whl-multi-arch/triton-3.8.0%2Bgit675c5987.rocm10.1.0a20260822-cp313-cp313-linux_x86_64.whl" },
 ]
 
 [[package]]

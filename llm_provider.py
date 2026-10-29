@@ -476,6 +476,31 @@ class LLMProvider:
         return response
 
     @staticmethod
+    def _extract_content(response_data, model):
+        """Return the stripped message content of a chat completion.
+
+        Raises ValueError on a malformed response, and on an empty answer cut off by the
+        token budget (finish_reason == "length"), so generate() returns the Error string
+        instead of an empty answer."""
+        if not isinstance(response_data, dict) or not response_data.get('choices'):
+            raise ValueError("Invalid response structure from LLM API")
+        choice = response_data['choices'][0]
+        message = choice.get('message') if isinstance(choice, dict) else None
+        if not isinstance(message, dict):
+            raise ValueError("Missing 'message' in LLM API response choice")
+        content = message.get('content')
+        if not content and choice.get('finish_reason') == "length":
+            reasoning = message.get('reasoning_content') or ""
+            logging.warning(
+                f"Model {model} ran out of token budget (finish_reason=length) with empty content; "
+                f"reasoning_content length: {len(reasoning)} chars. Raise MaxTokens for this role."
+            )
+            raise ValueError(f"Model {model} returned no answer: token budget exhausted (finish_reason=length)")
+        if 'content' not in message or content is None:
+            raise ValueError("Missing 'content' in LLM API response choice")
+        return content.strip()
+
+    @staticmethod
     def _select_model(preferences, available_models):
         """Pick a model id: per preference in order, an exact (case-insensitive) id match
         wins over a substring match; else the first listed id; None if nothing is listed."""
@@ -547,7 +572,7 @@ class LLMProvider:
             response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
             response_data = response.json()
-            response_content = response_data['choices'][0]['message']['content'].strip()
+            response_content = self._extract_content(response_data, chosen_model)
 
             # --- Token Counting for Response ---
             # Use the actual response content to count tokens
@@ -668,13 +693,7 @@ class LLMProvider:
                 response.raise_for_status() # Raise ClientResponseError for bad responses (4xx or 5xx)
 
                 response_data = await response.json()
-                # Basic validation of response structure
-                if not isinstance(response_data, dict) or 'choices' not in response_data or not response_data['choices']:
-                    raise ValueError("Invalid response structure from LLM API")
-                if 'message' not in response_data['choices'][0] or 'content' not in response_data['choices'][0]['message']:
-                     raise ValueError("Missing 'content' in LLM API response choice")
-
-                response_content = response_data['choices'][0]['message']['content'].strip()
+                response_content = self._extract_content(response_data, chosen_model)
 
                 # --- Token Counting for Response ---
                 response_tokens = self._count_tokens(response_content)

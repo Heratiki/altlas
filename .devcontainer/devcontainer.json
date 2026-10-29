@@ -33,7 +33,7 @@
     8888,
     1234
   ],
-  "postCreateCommand": "uv sync --frozen",
+  "postCreateCommand": "uv sync --frozen --extra cpu",
   
   // Keep just one networking option
   "runArgs": [

@@ -24,12 +24,12 @@ Not mature yet:
 
 ## Quick Start
 
-The project is designed for the devcontainer in `.devcontainer/`.
+The project is designed for the devcontainer in `.devcontainer/`. Install with `uv sync --extra cpu`; run commands with `uv run --extra cpu` (a bare `uv run` removes torch).
 
 ```bash
-uv run python runner.py --task benchmark_add_two_numbers
-uv run python runner.py --task benchmark_add_two_numbers --debug
-uv run python runner.py --task benchmark_add_two_numbers --reset
+uv run --extra cpu python runner.py --task benchmark_add_two_numbers
+uv run --extra cpu python runner.py --task benchmark_add_two_numbers --debug
+uv run --extra cpu python runner.py --task benchmark_add_two_numbers --reset
 ./start_altlas.sh
 ```
 
@@ -38,6 +38,19 @@ Primary entrypoints:
 - `runner.py`: orchestration and training run startup
 - `altlas_ui.py`: terminal task picker and launcher
 - `config.ini`: runtime, model, optimizer, logging, and provider settings
+
+## AMD Navi 10 GPU (optional)
+
+The default is CPU (`uv sync --extra cpu`). For an RX 5700 XT (gfx1010) use the other extra instead; the two extras conflict, so use one venv per extra:
+
+```bash
+uv sync --extra gfx101x          # about 5 GB download
+ALTLAS_DEVICE=cuda uv run --extra gfx101x python runner.py --task benchmark_add_two_numbers
+```
+
+- The build is an unmaintained June 2026 AMD nightly (`torch 2.12.0+rocm7.14.0a20260612`, TheRock gfx101X index).
+- MIOpen fails on LSTM training on gfx101x, so `get_pytorch_device()` sets `torch.backends.cudnn.enabled = False` there. Set `ALTLAS_MIOPEN=1` to keep MIOpen on (to test newer stacks).
+- Without `ALTLAS_DEVICE=cuda` the run stays on CPU.
 
 ## Repository Layout
 

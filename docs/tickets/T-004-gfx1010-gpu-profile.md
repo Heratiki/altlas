@@ -1,6 +1,6 @@
 # T-004: Optional AMD Navi 10 (gfx1010) GPU setup
 
-Status: open
+Status: landed (worktree-agent-a0a5711a343bb9166, 2026-10-29)
 Opened: 2026-10-29 by the orchestrator, from maintainer ruling R8 and host tests of 2026-10-29.
 Depends on: T-001 (uv packaging), T-002 (safe device selection; CPU stays the default, R1)
 

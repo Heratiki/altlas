@@ -18,7 +18,7 @@ WORKDIR /workspace
 # Python dependencies from the lock (CPU torch from the PyTorch CPU index)
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 COPY pyproject.toml uv.lock .python-version /workspace/
-RUN uv sync --frozen && chmod -R a+rX /opt/venv
+RUN uv sync --frozen --extra cpu && chmod -R a+rX /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Create the vscode user with sudo access

@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "AltLAS training loop"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "torch",
     "numpy",
     "requests",
     "aiohttp",
@@ -12,13 +11,39 @@ dependencies = [
     "matplotlib",
 ]
 
+[project.optional-dependencies]
+# Pick exactly one extra: uv sync --extra cpu (default path) or --extra gfx101x.
+cpu = ["torch"]
+gfx101x = [
+    "torch==2.12.0+rocm7.14.0a20260612",
+    "rocm[libraries]==7.14.0a20260612",
+    # Transitive pre-releases are pinned here so no global prerelease setting is needed.
+    "rocm-sdk-core==7.14.0a20260612",
+    "rocm-sdk-libraries-gfx101x-dgpu==7.14.0a20260612",
+    "triton==3.7.0+gitb4e20bbe.rocm7.14.0a20260612",
+]
+
 [tool.uv]
 package = false
+index-strategy = "unsafe-best-match"
+conflicts = [[{ extra = "cpu" }, { extra = "gfx101x" }]]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[[tool.uv.index]]
+name = "therock-gfx101x"
+url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/"
+explicit = true
+
 [tool.uv.sources]
-torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'linux'" },
+    { index = "therock-gfx101x", extra = "gfx101x" },
+]
+triton = [{ index = "therock-gfx101x", extra = "gfx101x" }]
+rocm = [{ index = "therock-gfx101x", extra = "gfx101x" }]
+rocm-sdk-core = [{ index = "therock-gfx101x", extra = "gfx101x" }]
+rocm-sdk-libraries-gfx101x-dgpu = [{ index = "therock-gfx101x", extra = "gfx101x" }]

@@ -24,6 +24,9 @@ def get_pytorch_device():
     gfx1010 (Navi 10, for example the RX 5700 XT); without it the first kernel
     fails with "HIP error: invalid device function".
 
+    On a gfx101x GPU, ``torch.backends.cudnn.enabled`` is set to False (MIOpen
+    breaks LSTM training there) unless ALTLAS_MIOPEN=1.
+
     Returns:
         torch.device: The selected PyTorch device ('cuda' or 'cpu').
     """
@@ -53,6 +56,17 @@ def get_pytorch_device():
         return torch.device("cpu")
 
     logging.info("GPU kernel test passed. Using %s.", device)
+
+    # gfx101x (Navi 10): MIOpen fails on RNN backward (runtime CK kernel error),
+    # so turn it off. ALTLAS_MIOPEN=1 keeps it on, for testing newer stacks.
+    # gcnArchName exists only on ROCm builds; do nothing without it.
+    try:
+        arch = getattr(torch.cuda.get_device_properties(device), "gcnArchName", "")
+    except Exception:
+        arch = ""
+    if arch.startswith("gfx101") and os.environ.get("ALTLAS_MIOPEN", "").strip() != "1":
+        torch.backends.cudnn.enabled = False
+        logging.info("MIOpen is off for RNN training on gfx101x (set ALTLAS_MIOPEN=1 to keep it).")
     return device
 
 

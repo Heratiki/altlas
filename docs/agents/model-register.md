@@ -59,3 +59,25 @@ Z.ai models only (`zai-coding-plan/`) until 2026-11-21 (maintainer ruling
 | | | | | |
 
 ### Evidence
+
+| Ended | Lane | Kind | Model | Effort | Task | Pool | Outcome | Wall (min) | 5h (pp) | Week (pp) | Marks |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-29T13:00Z | agent-a8dd436c | claude | claude-sonnet-5-5 | low | verify | claude | completed | 0.8 | 0 | 0 | split |
+| 2026-10-29T13:06Z | agent-acb4dcfc | claude | claude-sonnet-5-5 | low | write | claude | completed | 1.7 | 0 | 0 | split |
+| 2026-10-29T13:06Z | rocm-gfx1010 | codex | gpt-6.1-terra | medium | ? | codex | done | 1.2 | 1 | 0 | partial |
+| 2026-10-29T13:12Z | agent-a10f73a6 | claude | claude-sonnet-5-5 | medium | build | claude | completed | 5.8 | 0.3 | 0 | split, lane=agent-a10f73a65275d38a2, gates=16 |
+| 2026-10-29T13:09Z | agent-a32c877f | claude | claude-sonnet-5-5 | medium | build | claude | completed | 2.3 | 0.2 | 0 | split, gates=11 |
+| 2026-10-29T13:11Z | agent-ad14b95f | claude | claude-sonnet-5-5 | low | verify | claude | completed | 0.5 | 0 | 0 | split, lane=agent-a10f73a65275d38a2. |
+| 2026-10-29T13:11Z | therock-gfx101x | codex | gpt-6.1-terra | medium | ? | codex | done | 0.6 | 1 | 0 |  |
+| 2026-10-29T13:13Z | agent-a7181d50 | claude | claude-sonnet-5-5 | low | verify | claude | completed | 2.6 | 0.2 | 0 | split, lane=agent-a32c877f7ea9f595f. |
+| 2026-10-29T13:17Z | agent-a13e30e7 | claude | claude-sonnet-5-5 | medium | build | claude | completed | 6.8 | 0.3 | 0 | split, gates=11 |
+| 2026-10-29T13:15Z | agent-a3fc1a92 | claude | claude-sonnet-5-5 | low | verify | claude | completed | 1 | 0 | 0 | split, lane=agent-a13e30e7aa3033006. |
+| 2026-10-29T13:16Z | agent-aea50b1e | claude | claude-sonnet-5-5 | low | verify | claude | completed | 1.9 | 0 | 0 | split, lane=agent-a10f73a65275d38a2. |
+| 2026-10-29T13:18Z | agent-a5fc3c1a | claude | claude-sonnet-5-5 | low | verify | claude | completed | 0.5 | 0 | 0 | split |
+| 2026-10-29T13:23Z | agent-a018cc81 | claude | claude-sonnet-5-5 | low | write | claude | completed | 1.1 | 0 | 0 | split |
+| 2026-10-29T13:27Z | agent-a0a5711a | claude | claude-sonnet-5-5 | medium | build | claude | completed | 3 | 0 | 0 | split, gates=14 |
+| 2026-10-29T13:30Z | agent-a0d26209 | claude | claude-sonnet-5-5 | low | verify | claude | completed | 1.4 | 0 | 0 | split, lane=agent-a0a5711a343bb9166. |
+| 2026-10-29T14:09Z | agent-a7a68d7c | claude | claude-sonnet-5-5 | low | write | claude | completed | 1.2 | 0.1 | 0 | split |
+| 2026-10-29T14:12Z | agent-a1533722 | claude | claude-sonnet-5-5 | medium | build | claude | completed | 2.8 | 0 | 0 | split, gates=15 |
+| 2026-10-29T14:13Z | agent-ac2ac6e5 | claude | claude-sonnet-5-5 | low | verify | claude | completed | 1 | 0 | 0 | split, lane=agent-a1533722df52ec416. |
+<!-- generated from model-register.runs.json; edit with register.py, not by hand -->

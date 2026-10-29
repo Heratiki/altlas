@@ -106,3 +106,6 @@ memory/fingerprints.json
 .claude/worktrees/
 .claude/settings.local.json
 .scratch/
+
+# lane-panel register lock
+docs/agents/*.lock

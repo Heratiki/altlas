@@ -19,8 +19,10 @@ import torch
 class LLMProvider:
     def __init__(self, config: dict = None):
         self.config = config or {}
-        self.provider = self.config.get("provider", "vllm")
-        self.vllm_base_url = self.config.get("vllm_base_url", "http://localhost:8000/v1")
+        self.provider = self.config.get("provider", "llamacpp")
+        self.llamacpp_base_url = self.config.get("llamacpp_base_url", "http://localhost:8080/v1")
+        # vLLM has no default URL (R5): it works only when vllm_base_url is configured.
+        self.vllm_base_url = self.config.get("vllm_base_url", "")
         self.lmstudio_base_url = self.config.get("lmstudio_base_url", "http://localhost:1234/v1")
         self.model_preference = self.config.get("model_preference", ["wizardcoder", "codellama", "code-llama", "stable-code", "starcoder", "llama"])
         self.timeout = int(self.config.get("timeout", 120))
@@ -399,8 +401,27 @@ class LLMProvider:
         response_tokens = 0 # Initialize response token count
 
         try:
+            if self.provider == "llamacpp":
+                try:
+                    response_content, response_tokens = self._call_llm_api(
+                        base_url=self.llamacpp_base_url,
+                        prompt=prompt,
+                        temperature=temperature,
+                        max_tokens=max_response_tokens
+                    )
+                    response = response_content
+                    success = True
+                except Exception as e:
+                    logging.error(f"Sync llama.cpp call failed (no fallback): {e}")
+                    response = f"Error generating LLM response: {e}"
+
+            elif self.provider == "vllm" and not self.vllm_base_url:
+                msg = "vLLM provider selected but vLLMBaseURL is not configured"
+                logging.error(msg)
+                response = f"Error generating LLM response: {msg}"
+
             # Try vLLM first if configured
-            if self.provider == "vllm":
+            if response is None and self.provider == "vllm":
                 try:
                     response_content, response_tokens = self._call_llm_api(
                         base_url=self.vllm_base_url,
@@ -454,6 +475,22 @@ class LLMProvider:
 
         return response
 
+    @staticmethod
+    def _select_model(preferences, available_models):
+        """Pick a model id: per preference in order, an exact (case-insensitive) id match
+        wins over a substring match; else the first listed id; None if nothing is listed."""
+        for preferred in preferences or []:
+            wanted = str(preferred).strip().lower()
+            if not wanted:
+                continue
+            for model in available_models:
+                if model.lower() == wanted:
+                    return model
+            for model in available_models:
+                if wanted in model.lower():
+                    return model
+        return available_models[0] if available_models else None
+
     def _call_llm_api(self, base_url, prompt, temperature, max_tokens):
         """ Calls the LLM API synchronously and returns (response_content, response_tokens). """
         headers = {"Content-Type": "application/json"}
@@ -467,16 +504,7 @@ class LLMProvider:
                 available_models = [m["id"] for m in models_data.get("data", [])]
                 logging.debug(f"Available models at {base_url}: {available_models}") # Debug level
 
-                for preferred in self.model_preference:
-                    for model in available_models:
-                        if preferred.lower() in model.lower():
-                            chosen_model = model
-                            break
-                    if chosen_model:
-                        break
-
-                if not chosen_model and available_models:
-                    chosen_model = available_models[0]
+                chosen_model = self._select_model(self.model_preference, available_models)
 
                 if chosen_model:
                     logging.info(f"Using model: {chosen_model}")
@@ -593,16 +621,7 @@ class LLMProvider:
                     available_models = [m["id"] for m in models_data.get("data", [])]
                     logging.debug(f"Available models at {base_url}: {available_models}")
 
-                    for preferred in self.model_preference:
-                        for model in available_models:
-                            if preferred.lower() in model.lower():
-                                chosen_model = model
-                                break
-                        if chosen_model:
-                            break
-
-                    if not chosen_model and available_models:
-                        chosen_model = available_models[0] # Fallback to first available
+                    chosen_model = self._select_model(self.model_preference, available_models)
 
                     if chosen_model:
                         logging.info(f"Using model: {chosen_model}")
@@ -874,8 +893,27 @@ class LLMProvider:
         response_tokens = 0
 
         try:
+            if self.provider == "llamacpp":
+                try:
+                    response_content, response_tokens = await self._call_llm_api_async(
+                        base_url=self.llamacpp_base_url,
+                        prompt=prompt,
+                        temperature=temperature,
+                        max_tokens=max_response_tokens
+                    )
+                    response = response_content
+                    success = True
+                except Exception as e:
+                    logging.error(f"Async llama.cpp call failed (no fallback): {e}")
+                    response = f"Error generating LLM response: {e}"
+
+            elif self.provider == "vllm" and not self.vllm_base_url:
+                msg = "vLLM provider selected but vLLMBaseURL is not configured"
+                logging.error(msg)
+                response = f"Error generating LLM response: {msg}"
+
             # Try vLLM first if configured
-            if self.provider == "vllm":
+            if response is None and self.provider == "vllm":
                 try:
                     response_content, response_tokens = await self._call_llm_api_async(
                         base_url=self.vllm_base_url,

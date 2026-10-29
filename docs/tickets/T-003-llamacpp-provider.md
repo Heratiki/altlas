@@ -1,6 +1,6 @@
 # T-003: llama.cpp provider for the LLM roles
 
-Status: open
+Status: landed (worktree-agent-a13e30e7aa3033006, 2026-10-29)
 Opened: 2026-10-29 by the orchestrator, from maintainer ruling R4 after the project's 18-month idle.
 Depends on: none
 
@@ -17,6 +17,10 @@ Depends on: none
 
 - R4: LLM roles use the llama.cpp `llama-server` through its OpenAI-compatible API; add it as a provider. Reason: it already runs on the host and uses the Vulkan GPU path. Rejected: ROCm torch for LLMs; hosted providers for planner/critic.
 - Default provider becomes `llamacpp`; nothing defaults to port 8000.
+- R5: vLLM has no default URL. It works only when config.ini sets `vLLMBaseURL`; without it the vllm provider logs an error and returns the existing `Error generating LLM response: ...` string. Nothing defaults to port 8000.
+- R6: Role models split by role. Advisor and analyst prefer Qwen3-4B-Instruct-2507-Q4_K_M; planner and critic prefer Qwen3-8B-Q4_K_M, then gemma-4-12B-it-qat-UD-Q4_K_XL. The default `[LLM] ModelPreference` is Qwen3-8B-Q4_K_M. All stay config values. The router loads one model at a time, so reloads between roles are accepted.
+- R7: All roles are `Tier = local`.
+- Accepted: llamacpp calls only its own URL, with no fall-through to LM Studio.
 
 ## Settled design
 

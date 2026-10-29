@@ -27,9 +27,9 @@ Not mature yet:
 The project is designed for the devcontainer in `.devcontainer/`.
 
 ```bash
-python runner.py --task benchmark_add_two_numbers
-python runner.py --task benchmark_add_two_numbers --debug
-python runner.py --task benchmark_add_two_numbers --reset
+uv run python runner.py --task benchmark_add_two_numbers
+uv run python runner.py --task benchmark_add_two_numbers --debug
+uv run python runner.py --task benchmark_add_two_numbers --reset
 ./start_altlas.sh
 ```
 

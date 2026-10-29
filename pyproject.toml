@@ -1,0 +1,24 @@
+[project]
+name = "altlas"
+version = "0.1.0"
+description = "AltLAS training loop"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "torch",
+    "numpy",
+    "requests",
+    "aiohttp",
+    "rich",
+    "matplotlib",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

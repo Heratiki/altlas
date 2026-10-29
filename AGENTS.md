@@ -7,11 +7,11 @@ Core runtime code lives at the repository root and in focused packages. Use `run
 This project is designed for the devcontainer in `.devcontainer/`.
 
 ```bash
-python runner.py --task benchmark_add_two_numbers
-python runner.py --task benchmark_add_two_numbers --debug
-python runner.py --task benchmark_add_two_numbers --reset
+uv run python runner.py --task benchmark_add_two_numbers
+uv run python runner.py --task benchmark_add_two_numbers --debug
+uv run python runner.py --task benchmark_add_two_numbers --reset
 ./start_altlas.sh
-python -m py_compile runner.py altlas_ui.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py
+uv run python -m py_compile runner.py altlas_ui.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py
 ```
 
 `runner.py` starts a training run for a specific task, `--debug` increases console logging, and `--reset` clears saved state before training. `start_altlas.sh` launches the terminal UI directly in-container or via Docker outside the container. Use `py_compile` as a lightweight syntax check before opening a PR.
@@ -20,7 +20,7 @@ python -m py_compile runner.py altlas_ui.py core/*.py agent_core/*.py evaluator/
 Follow existing Python style: 4-space indentation, `snake_case` for functions and variables, `PascalCase` for classes, and short module docstrings where helpful. Keep imports grouped as standard library, third-party, then local packages. Match current naming patterns such as `TrainingLoop`, `CodeGenerator`, and `load_task`. There is no repo-level formatter config, so keep changes consistent with surrounding files and avoid broad style-only rewrites.
 
 ## Testing Guidelines
-There is no dedicated `tests/` suite yet. Validate changes with targeted benchmark runs in `task/benchmarks/` and include the exact command used in your PR notes. For changes to task loading, execution, or scoring, run at least one relevant benchmark and a syntax pass with `python -m py_compile`. If you add automated tests later, place them in a new `tests/` package and name files `test_<feature>.py`.
+There is no dedicated `tests/` suite yet. Validate changes with targeted benchmark runs in `task/benchmarks/` and include the exact command used in your PR notes. For changes to task loading, execution, or scoring, run at least one relevant benchmark and a syntax pass with `uv run python -m py_compile`. If you add automated tests later, place them in a new `tests/` package and name files `test_<feature>.py`.
 
 ## Commit & Pull Request Guidelines
 Recent history uses short imperative subjects, often with Conventional Commit prefixes such as `feat:` and `refactor:`. Prefer `type: concise summary`, for example `feat: improve duplicate attempt tracking`. Keep commits focused. PRs should describe the affected module(s), task or benchmark used for validation, any `config.ini` changes, and terminal output or screenshots when UI behavior changes. Do not commit logs, `.pth` model state, or generated files from `memory/`.

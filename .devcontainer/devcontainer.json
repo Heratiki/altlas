@@ -32,7 +32,7 @@
     8888,
     1234
   ],
-  "postCreateCommand": "pip install requests ipykernel",
+  "postCreateCommand": "uv sync --frozen",
   
   // Keep just one networking option
   "runArgs": [

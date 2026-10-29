@@ -30,10 +30,10 @@ Recent history uses short imperative subjects, often with Conventional Commit pr
 The default is CPU (`uv sync --extra cpu`). For an RX 5700 XT (gfx1010) use the other extra instead; the two extras conflict, so use one venv per extra:
 
 ```bash
-uv sync --extra gfx101x          # about 5 GB download
+uv sync --extra gfx101x          # about 1.4 GB download
 ALTLAS_DEVICE=cuda uv run --extra gfx101x python runner.py --task benchmark_add_two_numbers
 ```
 
-- The build is an unmaintained June 2026 AMD nightly (`torch 2.12.0+rocm7.14.0a20260612`, TheRock gfx101X index).
+- The build is the AMD multi-arch nightly of 2026-08-22 (`torch 2.14.0+rocm10.1.0a20260822` on ROCm 10.1.0a20260822). The gfx1010 kernels come in a separate device wheel (`amd-torch-device-gfx1010`). These are AMD nightlies without official support.
 - MIOpen fails on LSTM training on gfx101x, so `get_pytorch_device()` sets `torch.backends.cudnn.enabled = False` there. Set `ALTLAS_MIOPEN=1` to keep MIOpen on (to test newer stacks).
 - Without `ALTLAS_DEVICE=cuda` the run stays on CPU.

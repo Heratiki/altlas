@@ -15,12 +15,15 @@ dependencies = [
 # Pick exactly one extra: uv sync --extra cpu (default path) or --extra gfx101x.
 cpu = ["torch"]
 gfx101x = [
-    "torch==2.12.0+rocm7.14.0a20260612",
-    "rocm[libraries]==7.14.0a20260612",
+    # AMD multi-arch nightly of 2026-08-22: a base torch wheel plus a gfx1010 device wheel.
+    "torch==2.14.0+rocm10.1.0a20260822",
+    "amd-torch-device-gfx1010==2.14.0+rocm10.1.0a20260822",
     # Transitive pre-releases are pinned here so no global prerelease setting is needed.
-    "rocm-sdk-core==7.14.0a20260612",
-    "rocm-sdk-libraries-gfx101x-dgpu==7.14.0a20260612",
-    "triton==3.7.0+gitb4e20bbe.rocm7.14.0a20260612",
+    "rocm==10.1.0a20260822",
+    "rocm-sdk-core==10.1.0a20260822",
+    "rocm-sdk-libraries==10.1.0a20260822",
+    "rocm-sdk-device-gfx1010==10.1.0a20260822",
+    "triton==3.8.0+git675c5987.rocm10.1.0a20260822",
 ]
 
 [tool.uv]
@@ -34,16 +37,19 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "therock-gfx101x"
-url = "https://rocm.nightlies.amd.com/v2-staging/gfx101X-dgpu/"
+name = "therock-multi-arch"
+url = "https://rocm.nightlies.amd.com/whl-multi-arch/"
 explicit = true
 
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'linux'" },
-    { index = "therock-gfx101x", extra = "gfx101x" },
+    { index = "therock-multi-arch", extra = "gfx101x" },
 ]
-triton = [{ index = "therock-gfx101x", extra = "gfx101x" }]
-rocm = [{ index = "therock-gfx101x", extra = "gfx101x" }]
-rocm-sdk-core = [{ index = "therock-gfx101x", extra = "gfx101x" }]
-rocm-sdk-libraries-gfx101x-dgpu = [{ index = "therock-gfx101x", extra = "gfx101x" }]
+amd-torch-device-gfx1010 = [{ index = "therock-multi-arch", extra = "gfx101x" }]
+triton = [{ index = "therock-multi-arch", extra = "gfx101x" }]
+rocm = [{ index = "therock-multi-arch", extra = "gfx101x" }]
+rocm-bootstrap = [{ index = "therock-multi-arch" }]
+rocm-sdk-core = [{ index = "therock-multi-arch", extra = "gfx101x" }]
+rocm-sdk-libraries = [{ index = "therock-multi-arch", extra = "gfx101x" }]
+rocm-sdk-device-gfx1010 = [{ index = "therock-multi-arch", extra = "gfx101x" }]

@@ -1,6 +1,6 @@
 # T-002: Safe PyTorch device selection
 
-Status: open
+Status: landed (worktree-agent-a32c877f7ea9f595f, 2026-10-29)
 Opened: 2026-10-29 by the orchestrator, from maintainer ruling R1 after the project's 18-month idle.
 Depends on: none
 
@@ -33,14 +33,14 @@ Depends on: none
 
 ## Acceptance
 
-- [ ] `env -u ALTLAS_DEVICE python -c "from utils import get_pytorch_device as g; print(g())"` prints `cpu`.
-- [ ] `ALTLAS_DEVICE=cpu` prints `cpu`.
-- [ ] `ALTLAS_DEVICE=auto python -c "from utils import get_pytorch_device as g; print(g())"` on this host exits 0, prints `cpu`, and the log contains a WARNING naming the failed kernel (not a traceback).
-- [ ] `ALTLAS_DEVICE=cuda` behaves the same as `auto` on this host.
-- [ ] `ALTLAS_DEVICE=bogus` prints `cpu` with a warning.
-- [ ] `grep -n "ALTLAS_DEVICE\|HSA_OVERRIDE_GFX_VERSION" utils.py` shows both in the docstring.
-- [ ] `grep -rn get_pytorch_device --include=*.py .` shows the callers listed above and none requiring a signature change.
-- [ ] Ticket Status set to `landed (<branch>, YYYY-MM-DD)` in the lane's commit.
-- [ ] Gates pass: `python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py` and `node scripts/check-tickets.mjs`.
+- [x] `env -u ALTLAS_DEVICE python -c "from utils import get_pytorch_device as g; print(g())"` prints `cpu`.
+- [x] `ALTLAS_DEVICE=cpu` prints `cpu`.
+- [x] `ALTLAS_DEVICE=auto python -c "from utils import get_pytorch_device as g; print(g())"` on this host exits 0, prints `cpu`, and the log contains a WARNING naming the failed kernel (not a traceback).
+- [x] `ALTLAS_DEVICE=cuda` behaves the same as `auto` on this host.
+- [x] `ALTLAS_DEVICE=bogus` prints `cpu` with a warning.
+- [x] `grep -n "ALTLAS_DEVICE\|HSA_OVERRIDE_GFX_VERSION" utils.py` shows both in the docstring.
+- [x] `grep -rn get_pytorch_device --include=*.py .` shows the callers listed above and none requiring a signature change.
+- [x] Ticket Status set to `landed (<branch>, YYYY-MM-DD)` in the lane's commit.
+- [x] Gates pass: `python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py` and `node scripts/check-tickets.mjs`.
 
 Do NOT run the test harness. Stage paths explicitly.

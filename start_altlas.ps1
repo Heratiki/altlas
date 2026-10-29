@@ -15,7 +15,7 @@ if ($env:ALT_IN_CONTAINER -eq '1') {
 
 if ($inContainer) {
     Write-Host '[INFO] Detected container environment. Running AltLAS UI directly...'
-    uv run python altlas_ui.py @args
+    uv run --extra cpu python altlas_ui.py @args
     exit $LASTEXITCODE
 }
 
@@ -40,4 +40,4 @@ docker run --rm -it `
     -w /app `
     -e ALT_IN_CONTAINER=1 `
     altlas-image:latest `
-    uv run python altlas_ui.py @args
+    uv run --extra cpu python altlas_ui.py @args

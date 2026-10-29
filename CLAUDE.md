@@ -63,12 +63,12 @@ worktree path.
 
 ```yaml
 gates:                       # static gates, run by every lane, by lane-verifier and on main after a merge
-  - uv run python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py
+  - uv run --extra cpu python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py
   - node scripts/check-tickets.mjs
 ticket_lint: node scripts/check-tickets.mjs
 test_paths: task/benchmarks/*.json           # globs of test files (lane-verifier's test-only-fix check)
-test_full: uv run python benchmark_runner.py             # the full suite; only suite-verifier or the orchestrator runs it
-test_scoped: uv run python benchmark_runner.py --task {tests}         # e.g. "npm test -- {tests}"; none if the runner has no scoped mode
+test_full: uv run --extra cpu python benchmark_runner.py             # the full suite; only suite-verifier or the orchestrator runs it
+test_scoped: uv run --extra cpu python benchmark_runner.py --task {tests}         # e.g. "npm test -- {tests}"; none if the runner has no scoped mode
 test_scoped_list: none  # command that prints the tests a lane touched; none
 test_lock: none                 # no lock file; the harness writes shared memory/ state, so only suite-verifier runs it
 test_log: memory/reports/               # file where runs are stamped; none

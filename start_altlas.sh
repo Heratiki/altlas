@@ -8,7 +8,7 @@ LOG_FILE="memory/launch_log.txt"
 # Detect if inside *any* container (dev container or Docker)
 if grep -qaE 'docker|containerd|/docker/' /proc/1/cgroup 2>/dev/null || [ -f /.dockerenv ] || [ "$ALT_IN_CONTAINER" = "1" ]; then
     echo "[INFO] Detected container environment. Running AltLAS UI directly..."
-    uv run python altlas_ui.py "$@"
+    uv run --extra cpu python altlas_ui.py "$@"
     exit $?
 fi
 
@@ -30,4 +30,4 @@ exec docker run --rm -it \
     -w /app \
     -e ALT_IN_CONTAINER=1 \
     altlas-image:latest \
-    uv run python altlas_ui.py "$@"
+    uv run --extra cpu python altlas_ui.py "$@"

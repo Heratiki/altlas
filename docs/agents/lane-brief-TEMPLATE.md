@@ -52,7 +52,7 @@ Fixed gates for every code lane:
       EVIDENCE: pending
 
     - [ ] G2: Static gates pass.
-      CHECK: uv run python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py && node scripts/check-tickets.mjs && echo STATIC-OK
+      CHECK: uv run --extra cpu python -m py_compile runner.py altlas_ui.py benchmark_runner.py core/*.py agent_core/*.py evaluator/*.py guardian/*.py reinforcer/*.py task/*.py memory/*.py && node scripts/check-tickets.mjs && echo STATIC-OK
       EXPECT: STATIC-OK
       EVIDENCE: pending
 

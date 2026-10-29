@@ -73,7 +73,7 @@ test_scoped_list: none  # command that prints the tests a lane touched; none
 test_lock: none                 # no lock file; the harness writes shared memory/ state, so only suite-verifier runs it
 test_log: memory/reports/               # file where runs are stamped; none
 test_logs: memory/reports/ and altlas_run.log             # where suite-verifier reads causes (log path or "docker logs <name>"); none
-deploy: docker build -t altlas-image:latest --label altlas.commit=$(git rev-parse HEAD) .devcontainer                   # command; none = /ship stops after the push
+deploy: docker build -f .devcontainer/Dockerfile -t altlas-image:latest --label altlas.commit=$(git rev-parse HEAD) .                   # command; none = /ship stops after the push
 deploy_precheck: docker ps -q --filter ancestor=altlas-image:latest   # any container ID = a run is active; ask the maintainer
 deploy_verify: docker image inspect altlas-image:latest | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['Config']['Labels'].get('altlas.commit'))"     # prints the deployed commit; must equal HEAD; none
 rig_check: none             # extra session-start commands (servers, containers); none

@@ -116,12 +116,13 @@ class ConfigLoader:
             llm_config = self.get_section('LLM')
             
             # Parse model preference list
-            model_pref_str = llm_config.get('ModelPreference', 'wizardcoder,codellama,code-llama,stable-code,starcoder,llama')
+            model_pref_str = llm_config.get('ModelPreference', 'Qwen3-8B-Q4_K_M')
             model_preference = [m.strip() for m in model_pref_str.split(',') if m.strip()]
             
             return {
-                'provider': llm_config.get('Provider', 'vllm'),
-                'vllm_base_url': llm_config.get('vLLMBaseURL', 'http://localhost:8000/v1'),
+                'provider': llm_config.get('Provider', 'llamacpp'),
+                'llamacpp_base_url': llm_config.get('LlamaCppBaseURL', 'http://localhost:8080/v1'),
+                'vllm_base_url': llm_config.get('vLLMBaseURL', ''),
                 'lmstudio_base_url': llm_config.get('LMStudioBaseURL', 'http://localhost:1234/v1'),
                 'model_preference': model_preference,
                 'timeout': llm_config.getint('Timeout', 120),
@@ -134,10 +135,11 @@ class ConfigLoader:
             log.error(f"Error parsing LLM configuration: {e}")
             # Return defaults or raise? For now, return defaults to be robust
             return {
-                'provider': 'vllm',
-                'vllm_base_url': 'http://localhost:8000/v1',
+                'provider': 'llamacpp',
+                'llamacpp_base_url': 'http://localhost:8080/v1',
+                'vllm_base_url': '',
                 'lmstudio_base_url': 'http://localhost:1234/v1',
-                'model_preference': ['wizardcoder', 'codellama', 'code-llama', 'stable-code', 'starcoder', 'llama'],
+                'model_preference': ['Qwen3-8B-Q4_K_M'],
                 'timeout': 120,
                 'temperature': 0.7,
                 'max_tokens': 500,
@@ -166,8 +168,9 @@ class ConfigLoader:
             model_preference = [m.strip() for m in model_pref_str.split(',') if m.strip()]
 
             role_configs[role_name] = {
-                'provider': section.get('Provider', default_config.get('provider', 'vllm')),
-                'vllm_base_url': section.get('vLLMBaseURL', default_config.get('vllm_base_url', 'http://localhost:8000/v1')),
+                'provider': section.get('Provider', default_config.get('provider', 'llamacpp')),
+                'llamacpp_base_url': section.get('LlamaCppBaseURL', default_config.get('llamacpp_base_url', 'http://localhost:8080/v1')),
+                'vllm_base_url': section.get('vLLMBaseURL', default_config.get('vllm_base_url', '')),
                 'lmstudio_base_url': section.get('LMStudioBaseURL', default_config.get('lmstudio_base_url', 'http://localhost:1234/v1')),
                 'model_preference': model_preference or default_config.get('model_preference', []),
                 'timeout': section.getint('Timeout', default_config.get('timeout', 120)),

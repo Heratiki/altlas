@@ -1,0 +1,11 @@
+.git
+.venv
+.claude
+.unlazy
+.scratch
+memory/
+deprecated/
+__pycache__
+**/__pycache__
+*.log*
+*.pth

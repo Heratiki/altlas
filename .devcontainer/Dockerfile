@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # System packages
 RUN apt-get update && apt-get install -y \
@@ -9,16 +9,17 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Python dependencies
-RUN pip install --upgrade pip && \
-    pip install onnx onnxruntime numpy rich
-
-# Install PyTorch (CPU Version)
-# Check https://pytorch.org/ for current commands
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# uv, copied from the official image
+COPY --from=ghcr.io/astral-sh/uv:0.6.4 /uv /uvx /usr/local/bin/
 
 # Create a working directory
 WORKDIR /workspace
+
+# Python dependencies from the lock (CPU torch from the PyTorch CPU index)
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+COPY pyproject.toml uv.lock .python-version /workspace/
+RUN uv sync --frozen && chmod -R a+rX /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Create the vscode user with sudo access
 ARG USERNAME=vscode
